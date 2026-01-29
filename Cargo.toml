@@ -1,0 +1,19 @@
+[package]
+name = "ubuntu_resource_api"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+actix-web = "4.4"
+tokio = { version = "1.35", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+sysinfo = "0.30"
+chrono = { version = "0.4.31", features = ["serde"] }
+time = "=0.3.37"
+
+[profile.release]
+opt-level = 3
+
+[[bin]]
+name = "ubuntu_resource_api"
+path = "src/main.rs"
