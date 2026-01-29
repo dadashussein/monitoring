@@ -17,3 +17,12 @@ opt-level = 3
 [[bin]]
 name = "ubuntu_resource_api"
 path = "src/main.rs"
+
+# For static binary builds
+[profile.release-static]
+inherits = "release"
+opt-level = 3
+strip = true
+lto = true
+panic = "abort"
+codegen-units = 1

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ubuntu Resource API - System Monitor</title>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0a0a0f;color:#fff;line-height:1.6}
+        .container{max-width:1200px;margin:0 auto;padding:0 24px}
+        nav{display:flex;justify-content:space-between;align-items:center;padding:24px 0;border-bottom:1px solid #333}
+        .logo{display:flex;align-items:center;gap:12px;font-weight:700;font-size:1.2rem}
+        .logo-icon{width:40px;height:40px;background:linear-gradient(135deg,#00d4ff,#a855f7);border-radius:10px;display:flex;align-items:center;justify-content:center}
+        .hero{text-align:center;padding:100px 0 60px}
+        .hero h1{font-size:3.5rem;font-weight:800;background:linear-gradient(135deg,#fff,#00d4ff);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:20px}
+        .hero p{color:#888;font-size:1.2rem;max-width:500px;margin:0 auto 40px}
+        .install-box{background:#12121a;border:1px solid #333;border-radius:12px;padding:24px;margin:40px auto;max-width:700px}
+        .install-box h3{color:#888;font-size:.8rem;text-transform:uppercase;margin-bottom:12px}
+        .code-block{background:#000;border-radius:8px;padding:16px;font-family:monospace;color:#0f0;display:flex;justify-content:space-between;align-items:center}
+        .btn{background:linear-gradient(135deg,#00d4ff,#a855f7);color:#000;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block}
+        .features{padding:80px 0;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px}
+        .feature{background:#12121a;border:1px solid #222;border-radius:16px;padding:32px}
+        .feature-icon{font-size:2rem;margin-bottom:16px}
+        .feature h3{margin-bottom:8px}
+        .feature p{color:#888;font-size:.9rem}
+        footer{text-align:center;padding:40px 0;color:#666;border-top:1px solid #333}
+        .copy-btn{background:#333;border:none;color:#fff;padding:6px 12px;border-radius:4px;cursor:pointer}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <nav>
+            <div class="logo"><div class="logo-icon">📊</div>Ubuntu Resource API</div>
+            <a href="https://github.com/yourusername/ubuntu-resource-api" class="btn">GitHub</a>
+        </nav>
+        
+        <div class="hero">
+            <h1>System Monitoring<br>Made Beautiful</h1>
+            <p>Real-time Ubuntu system monitoring with a stunning web dashboard. CPU, memory, disk, network, and processes - all in one place.</p>
+            
+            <div class="install-box">
+                <h3>Install with one command</h3>
+                <div class="code-block">
+                    <span id="install-cmd">curl -sSL https://your-domain.com/install | sudo bash</span>
+                    <button class="copy-btn" onclick="copyInstall()">Copy</button>
+                </div>
+            </div>
+            
+            <a href="#features" class="btn">Learn More</a>
+        </div>
+        
+        <div class="features" id="features">
+            <div class="feature">
+                <div class="feature-icon">⚡</div>
+                <h3>Real-time Metrics</h3>
+                <p>Live CPU usage per core, memory consumption, and system load with automatic updates.</p>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">💾</div>
+                <h3>Disk & Network</h3>
+                <p>Monitor all mounted filesystems and network interfaces with detailed statistics.</p>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">🔧</div>
+                <h3>Process Monitor</h3>
+                <p>Top processes by CPU usage with PID, memory, and runtime information.</p>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">🚀</div>
+                <h3>One-line Install</h3>
+                <p>No dependencies. No Docker. Just one command and you have a production-ready monitor.</p>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">🔒</div>
+                <h3>Secure by Default</h3>
+                <p>Runs as unprivileged user with systemd service for auto-restart and logging.</p>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">📱</div>
+                <h3>Responsive UI</h3>
+                <p>Beautiful dark-themed dashboard that works on desktop, tablet, and mobile.</p>
+            </div>
+        </div>
+        
+        <footer>
+            <p>Built with Rust + Actix Web. Open source on GitHub.</p>
+            <p style="margin-top:10px;font-size:.9rem">Install: <code style="background:#222;padding:4px 8px;border-radius:4px">curl -sSL https://your-domain.com/install | sudo bash</code></p>
+        </footer>
+    </div>
+    
+    <script>
+        function copyInstall() {
+            const cmd = document.getElementById('install-cmd').innerText;
+            navigator.clipboard.writeText(cmd);
+            const btn = document.querySelector('.copy-btn');
+            btn.innerText = 'Copied!';
+            setTimeout(() => btn.innerText = 'Copy', 2000);
+        }
+    </script>
+</body>
+</html>

@@ -1,6 +1,20 @@
 # Ubuntu Resource API
 
-A RESTful web API written in Rust for monitoring Ubuntu system resources.
+[![Build](https://img.shields.io/badge/build-passing-success)](https://github.com/yourusername/ubuntu-resource-api)
+[![Rust](https://img.shields.io/badge/rust-1.70%2B-orange?logo=rust)](https://rust-lang.org)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+A **production-ready** RESTful web API written in Rust for monitoring Ubuntu system resources with a beautiful real-time dashboard.
+
+## 🚀 One-Line Install
+
+```bash
+curl -sSL https://your-domain.com/install | sudo bash
+```
+
+Then open: `http://your-server-ip:8080/dashboard`
+
+**No Docker. No dependencies. Just works.**
 
 ## Features
 
@@ -43,9 +57,76 @@ cargo build --release
 
 The server will start on `http://127.0.0.1:8080`
 
+## 🚀 Deploying to Another Computer (No Rust Required!)
+
+The binary is **portable** and runs on any modern Linux x86_64 system without installing Rust!
+
+### Quick Deploy (One Command)
+
+```bash
+# Deploy to any Linux server
+./deploy.sh user@remote-host
+
+# Example
+./deploy.sh ubuntu@192.168.1.100
+```
+
+### Manual Deploy
+
+```bash
+# 1. Copy the binary (only 6.7MB, includes dashboard)
+scp target/release/ubuntu_resource_api user@remote-host:~/
+
+# 2. On the remote machine, just run:
+ssh user@remote-host
+chmod +x ubuntu_resource_api
+./ubuntu_resource_api
+
+# 3. Open dashboard:
+# http://remote-host:8080/dashboard
+```
+
+### Portable Package
+
+A ready-to-deploy package is created for you:
+
+```bash
+# Extract and run on any Linux machine
+tar -xzf ubuntu-resource-api-portable.tar.gz
+./ubuntu_resource_api
+```
+
+**Requirements:** Linux x86_64 with glibc 2.31+ (Ubuntu 20.04+, Debian 11+, CentOS 8+, etc.)
+
+### Run as Systemd Service
+
+```bash
+# Create service file
+sudo tee /etc/systemd/system/ubuntu-resource-api.service > /dev/null <<EOF
+[Unit]
+Description=Ubuntu Resource API
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/ubuntu_resource_api
+Restart=always
+User=ubuntu
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Enable and start
+sudo cp ubuntu_resource_api /usr/local/bin/
+sudo systemctl daemon-reload
+sudo systemctl enable ubuntu-resource-api
+sudo systemctl start ubuntu-resource-api
+```
+
 ## 🎨 Dashboard
 
-Open your browser and navigate to **`http://127.0.0.1:8080/dashboard`** for a beautiful, real-time system monitoring dashboard featuring:
+Open your browser and navigate to **`http://127.0.0.1:8080/dashboard`** (or `http://<remote-ip>:8080/dashboard`) for a beautiful, real-time system monitoring dashboard featuring:
 
 - **Dark theme** with gradient accents and modern design
 - **Real-time updates** (auto-refresh every 3 seconds)

@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Build Release Binary
+        run: cargo build --release
+
+      - name: Package Binary
+        run: |
+          mkdir -p dist
+          cp target/release/ubuntu_resource_api dist/ubuntu_resource_api-linux-x86_64
+          cp web/index.html dist/
+          cp install.sh dist/install
+          chmod +x dist/install
+          tar -czvf ubuntu-resource-api-${GITHUB_REF_NAME}.tar.gz -C dist .
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/ubuntu_resource_api-linux-x86_64
+            ubuntu-resource-api-*.tar.gz
+          body: |
+            ## Ubuntu Resource API ${GITHUB_REF_NAME}
+            
+            ### Quick Install
+            ```bash
+            curl -sSL https://your-domain.com/install | sudo bash
+            ```
+            
+            ### Manual Download
+            Download `ubuntu_resource_api-linux-x86_64` and run:
+            ```bash
+            chmod +x ubuntu_resource_api-linux-x86_64
+            ./ubuntu_resource_api-linux-x86_64
+            ```
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
