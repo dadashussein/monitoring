@@ -1,1 +1,25 @@
+# Rust build artifacts
 /target
+Cargo.lock
+
+# Distribution/build outputs
+/dist
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE/Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Portable package
+ubuntu-resource-api-portable.tar.gz
