@@ -1022,13 +1022,15 @@ async fn list_images() -> impl Responder {
         Ok(images) => {
             let result: Vec<DockerImage> = images.iter().map(|img| {
                 let default_tag = "<none>:<none>".to_string();
-                let repo_tags = img.repo_tags
-                    .as_ref()
-                    .and_then(|tags: &Vec<String>| tags.first())
-                    .unwrap_or(&default_tag)
-                    .clone();
                 
-                let parts: Vec<&str> = repo_tags.split(':').collect();
+                // Get first repo tag or use default
+                let repo_tag_str = if !img.repo_tags.is_empty() {
+                    img.repo_tags[0].clone()
+                } else {
+                    default_tag
+                };
+                
+                let parts: Vec<&str> = repo_tag_str.split(':').collect();
                 let repository = parts.get(0).unwrap_or(&"<none>").to_string();
                 let tag = parts.get(1).unwrap_or(&"<none>").to_string();
                 
