@@ -302,12 +302,12 @@
                 <div class="card-header">
                     <div class="card-title">
                         <div class="card-icon icon-cyan">🔧</div>
-                        Top Proseslər
+                        Top Processes
                     </div>
                     <div style="display: flex; gap: 8px;">
                         <select id="sort-select" class="refresh-btn" style="padding: 6px 12px;" onchange="loadProcesses()">
-                            <option value="cpu">CPU istifadəsi</option>
-                            <option value="memory">Memory istifadəsi</option>
+                            <option value="cpu">CPU Usage</option>
+                            <option value="memory">Memory Usage</option>
                         </select>
                         <span class="badge badge-cyan" id="process-count">--</span>
                     </div>
@@ -461,7 +461,7 @@
         }
 
         async function killProcess(pid, name) {
-            if (!confirm(`${name} prosesini dayandırmaq istədiyinizdən əminsiniz? (PID: ${pid})`)) {
+            if (!confirm(`Are you sure you want to kill process ${name}? (PID: ${pid})`)) {
                 return;
             }
             
@@ -478,7 +478,7 @@
                     showError(`❌ ${result.message}`);
                 }
             } catch (error) {
-                showError(`❌ Proses dayandırıla bilmədi: ${error.message}`);
+                showError(`❌ Failed to kill process: ${error.message}`);
             }
         }
 
@@ -494,7 +494,7 @@
                 return b.cpu_usage - a.cpu_usage;
             });
             
-            document.getElementById('process-count').textContent = `${sorted.length} proses`;
+            document.getElementById('process-count').textContent = `${sorted.length} processes`;
             
             const list = document.getElementById('process-list');
             list.innerHTML = sorted.map((proc, i) => {
