@@ -72,22 +72,22 @@
                 <div class="logo">🔄</div>
                 <div>
                     <h1>Nginx Reverse Proxy Manager</h1>
-                    <p style="color: var(--text-secondary); font-size: 0.875rem;">Reverse proxy konfiqurasiyalarını idarə edin</p>
+                    <p style="color: var(--text-secondary); font-size: 0.875rem;">Manage reverse proxy configurations</p>
                 </div>
             </div>
             <div style="display: flex; gap: 12px;">
                 <button class="btn" onclick="window.location.href='/dashboard'">📊 Resource Monitor</button>
                 <button class="btn" onclick="window.location.href='/docker'">🐳 Docker Manager</button>
-                <button class="btn btn-primary" onclick="openAddModal()">+ Yeni Proxy</button>
+                <button class="btn btn-primary" onclick="openAddModal()">+ New Proxy</button>
             </div>
         </header>
 
         <div id="message-container"></div>
 
         <div class="card">
-            <h2 style="margin-bottom: 20px;">Aktiv Proxy Konfiqurasiyaları</h2>
+            <h2 style="margin-bottom: 20px;">Active Proxy Configurations</h2>
             <div class="proxy-list" id="proxy-list">
-                <p style="color: var(--text-secondary);">Yüklənir...</p>
+                <p style="color: var(--text-secondary);">Loading...</p>
             </div>
         </div>
     </div>
@@ -96,13 +96,13 @@
     <div class="modal" id="proxy-modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h2 id="modal-title">Yeni Proxy</h2>
+                <h2 id="modal-title">New Proxy</h2>
                 <button class="close-btn" onclick="closeModal()">&times;</button>
             </div>
             <form id="proxy-form" onsubmit="saveProxy(event)">
                 <input type="hidden" id="proxy-id">
                 <div class="form-group">
-                    <label>Konfiqurasiya Adı</label>
+                    <label>Configuration Name</label>
                     <input type="text" id="proxy-name" placeholder="my-app" required>
                 </div>
                 <div class="form-group">
@@ -121,12 +121,12 @@
                     </select>
                 </div>
                 <div class="form-group">
-                    <label>Əlavə Konfiqurasiya (opsional)</label>
-                    <textarea id="proxy-extra" placeholder="# Əlavə nginx direktiv&#10;client_max_body_size 100M;"></textarea>
+                    <label>Additional Configuration (optional)</label>
+                    <textarea id="proxy-extra" placeholder="# Additional nginx directives&#10;client_max_body_size 100M;"></textarea>
                 </div>
                 <div class="form-actions">
-                    <button type="button" class="btn" onclick="closeModal()">Ləğv et</button>
-                    <button type="submit" class="btn btn-primary">Yadda saxla</button>
+                    <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
                 </div>
             </form>
         </div>
@@ -159,7 +159,7 @@
                 const list = document.getElementById('proxy-list');
                 
                 if (!Array.isArray(proxies) || proxies.length === 0) {
-                    list.innerHTML = '<p style="color: var(--text-secondary);">Heç bir proxy konfiqurasiyası yoxdur. Yeni əlavə edin.</p>';
+                    list.innerHTML = '<p style="color: var(--text-secondary);">No proxy configurations found. Add a new one.</p>';
                     return;
                 }
                 
@@ -173,26 +173,26 @@
                             </div>
                         </div>
                         <div class="proxy-actions">
-                            <button class="btn" onclick='editProxy(${JSON.stringify(proxy)})'>✏️ Düzəliş</button>
-                            <button class="btn btn-danger" onclick="deleteProxy('${proxy.name}', '${proxy.domain}')">🗑️ Sil</button>
+                            <button class="btn" onclick='editProxy(${JSON.stringify(proxy)})'>✏️ Edit</button>
+                            <button class="btn btn-danger" onclick="deleteProxy('${proxy.name}', '${proxy.domain}')">🗑️ Delete</button>
                         </div>
                     </div>
                 `).join('');
             } catch (error) {
                 console.error('Load error:', error);
-                showMessage('Proxy konfiqurasiyaları yüklənə bilmədi: ' + error.message, 'error');
+                showMessage('Failed to load proxy configurations: ' + error.message, 'error');
             }
         }
 
         function openAddModal() {
-            document.getElementById('modal-title').textContent = 'Yeni Proxy';
+            document.getElementById('modal-title').textContent = 'New Proxy';
             document.getElementById('proxy-form').reset();
             document.getElementById('proxy-id').value = '';
             document.getElementById('proxy-modal').classList.add('active');
         }
 
         function editProxy(proxy) {
-            document.getElementById('modal-title').textContent = 'Proxy Düzəliş';
+            document.getElementById('modal-title').textContent = 'Edit Proxy';
             document.getElementById('proxy-id').value = proxy.name;
             document.getElementById('proxy-name').value = proxy.name;
             document.getElementById('proxy-domain').value = proxy.domain;
@@ -231,15 +231,15 @@
                     closeModal();
                     loadProxies();
                 } else {
-                    showMessage(result.message || 'Xəta baş verdi', 'error');
+                    showMessage(result.message || 'An error occurred', 'error');
                 }
             } catch (error) {
-                showMessage('Yadda saxlanıla bilmədi: ' + error.message, 'error');
+                showMessage('Failed to save: ' + error.message, 'error');
             }
         }
 
         async function deleteProxy(name, domain) {
-            if (!confirm(`${domain} proxy konfiqurasiyasını silmək istədiyinizdən əminsiniz?`)) {
+            if (!confirm(`Are you sure you want to delete the proxy configuration for ${domain}?`)) {
                 return;
             }
             
@@ -254,10 +254,10 @@
                     showMessage(result.message);
                     loadProxies();
                 } else {
-                    showMessage(result.message || 'Silinə bilmədi', 'error');
+                    showMessage(result.message || 'Failed to delete', 'error');
                 }
             } catch (error) {
-                showMessage('Silinə bilmədi: ' + error.message, 'error');
+                showMessage('Failed to delete: ' + error.message, 'error');
             }
         }
 
