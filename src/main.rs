@@ -1,7 +1,7 @@
-use actix_web::{get, web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{delete, get, web, App, HttpResponse, HttpServer, Responder};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use sysinfo::{Disks, Networks, System};
+use sysinfo::{Disks, Networks, System, Pid, Signal};
 
 // Shared application state
 struct AppState {
@@ -333,6 +333,47 @@ async fn health_check() -> impl Responder {
     })
 }
 
+#[derive(Serialize)]
+struct KillResponse {
+    success: bool,
+    message: String,
+    pid: u32,
+}
+
+#[delete("/api/processes/{pid}")]
+async fn kill_process(data: web::Data<AppState>, pid: web::Path<u32>) -> impl Responder {
+    let mut system = data.system.lock().unwrap();
+    system.refresh_processes();
+    
+    let pid_value = pid.into_inner();
+    let process_pid = Pid::from_u32(pid_value);
+    
+    if let Some(process) = system.process(process_pid) {
+        let process_name = process.name().to_string();
+        
+        // Try to kill the process
+        if process.kill_with(Signal::Term).is_some() {
+            HttpResponse::Ok().json(KillResponse {
+                success: true,
+                message: format!("Process '{}' (PID: {}) terminated successfully", process_name, pid_value),
+                pid: pid_value,
+            })
+        } else {
+            HttpResponse::InternalServerError().json(KillResponse {
+                success: false,
+                message: format!("Failed to terminate process '{}' (PID: {})", process_name, pid_value),
+                pid: pid_value,
+            })
+        }
+    } else {
+        HttpResponse::NotFound().json(KillResponse {
+            success: false,
+            message: format!("Process with PID {} not found", pid_value),
+            pid: pid_value,
+        })
+    }
+}
+
 // ==================== Main ====================
 
 // Embedded dashboard HTML
@@ -358,17 +399,18 @@ async fn main() -> std::io::Result<()> {
     println!("📊 Dashboard: http://127.0.0.1:8080/dashboard");
     println!("");
     println!("📡 Available endpoints:");
-    println!("   GET /           - API info");
-    println!("   GET /dashboard  - Web dashboard");
-    println!("   GET /api/system - System information");
-    println!("   GET /api/cpu    - CPU information");
-    println!("   GET /api/cpu/usage - CPU usage statistics");
-    println!("   GET /api/memory - Memory information");
-    println!("   GET /api/disks  - Disk information");
-    println!("   GET /api/network - Network interfaces");
-    println!("   GET /api/processes - Running processes (?limit=N)");
-    println!("   GET /api/load   - System load average");
-    println!("   GET /health     - Health check");
+    println!("   GET    /           - API info");
+    println!("   GET    /dashboard  - Web dashboard");
+    println!("   GET    /api/system - System information");
+    println!("   GET    /api/cpu    - CPU information");
+    println!("   GET    /api/cpu/usage - CPU usage statistics");
+    println!("   GET    /api/memory - Memory information");
+    println!("   GET    /api/disks  - Disk information");
+    println!("   GET    /api/network - Network interfaces");
+    println!("   GET    /api/processes - Running processes (?limit=N)");
+    println!("   GET    /api/load   - System load average");
+    println!("   GET    /health     - Health check");
+    println!("   DELETE /api/processes/:pid - Kill process by PID");
 
     HttpServer::new(move || {
         App::new()
@@ -384,6 +426,7 @@ async fn main() -> std::io::Result<()> {
             .service(get_processes)
             .service(get_load_average)
             .service(health_check)
+            .service(kill_process)
     })
     .bind("127.0.0.1:8080")?
     .run()

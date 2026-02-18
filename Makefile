@@ -3,7 +3,7 @@
 # Build binary using Docker (no Rust installation needed)
 build:
 	@echo "🔨 Building binary with Docker..."
-	docker build -t ubuntu-resource-api-builder .
+	docker build --network=host -t ubuntu-resource-api-builder .
 	@mkdir -p target/release
 	docker run --rm -v $(PWD)/target/release:/output ubuntu-resource-api-builder sh -c "cp /app/target/release/ubuntu_resource_api /output/"
 	chmod +x ./target/release/ubuntu_resource_api

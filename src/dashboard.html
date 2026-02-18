@@ -92,9 +92,13 @@
         .process-list::-webkit-scrollbar { width: 6px; }
         .process-list::-webkit-scrollbar-track { background: var(--bg-secondary); border-radius: 3px; }
         .process-list::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
-        .process-item { display: flex; align-items: center; padding: 12px; border-radius: var(--radius-sm); transition: background 0.2s; }
+        .process-item { display: flex; align-items: center; padding: 12px; border-radius: var(--radius-sm); transition: background 0.2s; gap: 12px; }
         .process-item:hover { background: var(--bg-hover); }
         .process-item:not(:last-child) { border-bottom: 1px solid var(--border-color); }
+        .kill-btn { width: 32px; height: 32px; background: rgba(255,68,68,0.15); border: 1px solid var(--accent-red); color: var(--accent-red); border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 1rem; transition: all 0.2s; flex-shrink: 0; }
+        .kill-btn:hover { background: var(--accent-red); color: white; transform: scale(1.1); }
+        .kill-btn:active { transform: scale(0.95); }
+        .kill-btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .process-rank { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 0.75rem; border-radius: 6px; margin-right: 12px; }
         .rank-1 { background: linear-gradient(135deg, #ffd700, #ffaa00); color: #000; }
         .rank-2 { background: linear-gradient(135deg, #c0c0c0, #a0a0a0); color: #000; }
@@ -103,7 +107,7 @@
         .process-info { flex: 1; min-width: 0; }
         .process-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .process-meta { font-size: 0.75rem; color: var(--text-secondary); }
-        .process-cpu { text-align: right; }
+        .process-cpu { text-align: right; margin-right: 8px; }
         .process-cpu-value { font-family: 'JetBrains Mono', monospace; font-weight: 600; color: var(--accent-cyan); }
         .process-mem { font-size: 0.75rem; color: var(--text-secondary); }
         .disk-grid { display: grid; gap: 12px; }
@@ -292,9 +296,15 @@
                 <div class="card-header">
                     <div class="card-title">
                         <div class="card-icon icon-cyan">🔧</div>
-                        Top Processes
+                        Top Proseslər
                     </div>
-                    <span class="badge badge-cyan">By CPU Usage</span>
+                    <div style="display: flex; gap: 8px;">
+                        <select id="sort-select" class="refresh-btn" style="padding: 6px 12px;" onchange="loadProcesses()">
+                            <option value="cpu">CPU istifadəsi</option>
+                            <option value="memory">Memory istifadəsi</option>
+                        </select>
+                        <span class="badge badge-cyan" id="process-count">--</span>
+                    </div>
                 </div>
                 <div class="process-list" id="process-list">
                     <div class="skeleton" style="height: 50px; margin-bottom: 8px;"></div>
@@ -444,11 +454,44 @@
             document.getElementById('load-15').textContent = data.fifteen_min.toFixed(2);
         }
 
+        async function killProcess(pid, name) {
+            if (!confirm(`${name} prosesini dayandırmaq istədiyinizdən əminsiniz? (PID: ${pid})`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/processes/${pid}`, {
+                    method: 'DELETE'
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    showError(`✅ ${result.message}`);
+                    setTimeout(() => loadProcesses(), 500);
+                } else {
+                    showError(`❌ ${result.message}`);
+                }
+            } catch (error) {
+                showError(`❌ Proses dayandırıla bilmədi: ${error.message}`);
+            }
+        }
+
         async function loadProcesses() {
             const data = await fetchData('/api/processes?limit=20');
             if (!data) return;
+            
+            const sortBy = document.getElementById('sort-select').value;
+            const sorted = [...data].sort((a, b) => {
+                if (sortBy === 'memory') {
+                    return b.memory_bytes - a.memory_bytes;
+                }
+                return b.cpu_usage - a.cpu_usage;
+            });
+            
+            document.getElementById('process-count').textContent = `${sorted.length} proses`;
+            
             const list = document.getElementById('process-list');
-            list.innerHTML = data.map((proc, i) => {
+            list.innerHTML = sorted.map((proc, i) => {
                 const rankClass = i === 0 ? 'rank-1' : i === 1 ? 'rank-2' : i === 2 ? 'rank-3' : 'rank-other';
                 const runtime = formatDuration(proc.runtime_seconds);
                 return `<div class="process-item">
@@ -461,6 +504,7 @@
                         <div class="process-cpu-value">${proc.cpu_usage.toFixed(1)}%</div>
                         <div class="process-mem">${proc.memory_mb.toFixed(1)} MB</div>
                     </div>
+                    <button class="kill-btn" onclick="killProcess(${proc.pid}, '${proc.name.replace(/'/g, "\\'")}')">✕</button>
                 </div>`;
             }).join('');
         }
