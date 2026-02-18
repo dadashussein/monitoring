@@ -18,3 +18,8 @@ COPY src ./src
 
 # Build release binary (will generate new Cargo.lock)
 RUN cargo build --release
+
+# Copy binary to a known location for easy extraction
+RUN cp /app/target/release/ubuntu_resource_api /ubuntu_resource_api
+
+CMD ["cp", "/ubuntu_resource_api", "/output/ubuntu_resource_api"]
