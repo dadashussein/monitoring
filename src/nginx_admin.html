@@ -126,12 +126,37 @@
                         Buraya əlavə nginx direktiv və location blokları əlavə edə bilərsiniz
                     </small>
                     <textarea id="proxy-extra" placeholder="# Nümunələr:&#10;&#10;# Maksimum fayl ölçüsü&#10;client_max_body_size 100M;&#10;&#10;# API docs gizlət&#10;location ~ ^/api/docs {&#10;    return 404;&#10;}&#10;&#10;# WebSocket dəstəyi&#10;proxy_set_header Upgrade $http_upgrade;&#10;proxy_set_header Connection &quot;upgrade&quot;;&#10;&#10;# Timeout artır&#10;proxy_read_timeout 300s;&#10;proxy_connect_timeout 300s;"></textarea>
+                    <div style="display: flex; gap: 8px; margin-top: 8px;">
+                        <button type="button" class="btn" onclick="formatExtraConfig()" style="font-size: 0.75rem; padding: 6px 12px;">
+                            ✨ Format və Yoxla
+                        </button>
+                        <button type="button" class="btn" onclick="showPreview()" style="font-size: 0.75rem; padding: 6px 12px;">
+                            👁️ Tam Konfiqurasiya Önizləmə
+                        </button>
+                    </div>
+                    <div id="format-message" style="margin-top: 8px;"></div>
                 </div>
                 <div class="form-actions">
                     <button type="button" class="btn" onclick="closeModal()">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Save</button>
+                    <button type="submit" class="btn btn-primary" id="save-btn">Save</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- Preview Modal -->
+    <div class="modal" id="preview-modal">
+        <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-header">
+                <h2>📄 Tam Nginx Konfiqurasiya Önizləmə</h2>
+                <button class="close-btn" onclick="closePreviewModal()">&times;</button>
+            </div>
+            <div style="background: var(--bg-secondary); padding: 16px; border-radius: 8px; overflow-x: auto;">
+                <pre id="preview-content" style="margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 0.875rem; color: var(--text-primary); white-space: pre;"></pre>
+            </div>
+            <div class="form-actions" style="margin-top: 16px;">
+                <button type="button" class="btn btn-primary" onclick="closePreviewModal()">Bağla</button>
+            </div>
         </div>
     </div>
 
@@ -207,10 +232,165 @@
 
         function closeModal() {
             document.getElementById('proxy-modal').classList.remove('active');
+            document.getElementById('format-message').innerHTML = '';
+        }
+
+        function closePreviewModal() {
+            document.getElementById('preview-modal').classList.remove('active');
+        }
+
+        async function formatExtraConfig() {
+            const extraConfig = document.getElementById('proxy-extra').value.trim();
+            const messageDiv = document.getElementById('format-message');
+            
+            if (!extraConfig) {
+                messageDiv.innerHTML = '<p style="color: var(--text-secondary); font-size: 0.875rem;">Əlavə konfiqurasiya boşdur</p>';
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/nginx/format`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ config: extraConfig })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success && result.formatted) {
+                    document.getElementById('proxy-extra').value = result.formatted;
+                    messageDiv.innerHTML = '<div class="success-message" style="font-size: 0.875rem;">✅ Konfiqurasiya formatlandı və yoxlandı</div>';
+                    setTimeout(() => messageDiv.innerHTML = '', 3000);
+                } else if (result.error) {
+                    messageDiv.innerHTML = `<div class="error-message" style="font-size: 0.875rem;">❌ ${result.error}</div>`;
+                }
+            } catch (error) {
+                messageDiv.innerHTML = `<div class="error-message" style="font-size: 0.875rem;">❌ Xəta: ${error.message}</div>`;
+            }
+        }
+
+        function generateFullConfig() {
+            const name = document.getElementById('proxy-name').value || 'my-app';
+            const domain = document.getElementById('proxy-domain').value || 'app.example.com';
+            const backend = document.getElementById('proxy-backend').value || 'http://localhost:3000';
+            const ssl = document.getElementById('proxy-ssl').value === 'true';
+            const extraConfig = document.getElementById('proxy-extra').value.trim();
+            
+            const sslConfig = ssl ? `
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    
+    # SSL sertifikatları (Let's Encrypt və ya özəl)
+    # ssl_certificate /etc/letsencrypt/live/${domain}/fullchain.pem;
+    # ssl_certificate_key /etc/letsencrypt/live/${domain}/privkey.pem;
+    
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;` : `
+    listen 80;
+    listen [::]:80;`;
+            
+            let extraInLocation = '';
+            let extraInServer = '';
+            
+            if (extraConfig) {
+                if (extraConfig.includes('location')) {
+                    // Add at server level
+                    extraInServer = '\n    # Əlavə konfiqurasiya\n' + 
+                        extraConfig.split('\n').map(line => '    ' + line).join('\n');
+                } else {
+                    // Add inside location /
+                    extraInLocation = '\n        # Əlavə konfiqurasiya\n' + 
+                        extraConfig.split('\n').map(line => '        ' + line).join('\n');
+                }
+            }
+            
+            const now = new Date().toLocaleString('az-AZ');
+            
+            return `# Nginx Reverse Proxy - ${name}
+# Yaradılma: ${now}
+# Backend: ${backend}
+
+server {${sslConfig}
+    server_name ${domain};
+
+    location / {
+        proxy_pass ${backend};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;${extraInLocation}
+    }${extraInServer}
+}`;
+        }
+
+        async function showPreview() {
+            const extraConfig = document.getElementById('proxy-extra').value.trim();
+            
+            // First format if there's extra config
+            if (extraConfig) {
+                try {
+                    const response = await fetch(`${API_BASE}/api/nginx/format`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ config: extraConfig })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (result.success && result.formatted) {
+                        document.getElementById('proxy-extra').value = result.formatted;
+                    } else if (result.error) {
+                        document.getElementById('format-message').innerHTML = 
+                            `<div class="error-message" style="font-size: 0.875rem;">❌ ${result.error}</div>`;
+                        return;
+                    }
+                } catch (error) {
+                    console.error('Format error:', error);
+                }
+            }
+            
+            const fullConfig = generateFullConfig();
+            document.getElementById('preview-content').textContent = fullConfig;
+            document.getElementById('preview-modal').classList.add('active');
         }
 
         async function saveProxy(event) {
             event.preventDefault();
+            
+            const extraConfig = document.getElementById('proxy-extra').value.trim();
+            
+            // Validate extra config before saving
+            if (extraConfig) {
+                const messageDiv = document.getElementById('format-message');
+                try {
+                    const response = await fetch(`${API_BASE}/api/nginx/format`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ config: extraConfig })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (!result.success) {
+                        messageDiv.innerHTML = `<div class="error-message" style="font-size: 0.875rem;">❌ ${result.error}<br><br>Zəhmət olmasa əvvəlcə "Format və Yoxla" düyməsinə basın.</div>`;
+                        return;
+                    }
+                    
+                    // Use formatted version
+                    document.getElementById('proxy-extra').value = result.formatted;
+                } catch (error) {
+                    messageDiv.innerHTML = `<div class="error-message" style="font-size: 0.875rem;">❌ Validasiya xətası: ${error.message}</div>`;
+                    return;
+                }
+            }
             
             const data = {
                 name: document.getElementById('proxy-name').value,
