@@ -1,7 +1,7 @@
 .PHONY: build run docker-build docker-run docker-stop docker-logs clean help
 
 # Configuration
-ADDRESS ?= 10.0.0.1
+ADDRESS ?= 0.0.0.0
 PORT ?= 3012
 CONTAINER_NAME ?= ubuntu-resource-api
 
