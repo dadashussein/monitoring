@@ -32,11 +32,13 @@ docker-run: docker-build
 		-v /etc/nginx/sites-available:/etc/nginx/sites-available \
 		-v /etc/nginx/sites-enabled:/etc/nginx/sites-enabled \
 		-v /var/run:/var/run \
+		-v /var/run/docker.sock:/var/run/docker.sock \
 		--privileged \
 		ubuntu-resource-api
 	@echo "✅ Container started: $(CONTAINER_NAME)"
 	@echo "📊 Dashboard: http://$(ADDRESS):$(PORT)/dashboard"
 	@echo "🔄 Nginx Manager: http://$(ADDRESS):$(PORT)/nginx"
+	@echo "🐳 Docker Manager: http://$(ADDRESS):$(PORT)/docker"
 	@echo "🔍 Logs: make docker-logs"
 
 # Stop Docker container

@@ -5,6 +5,12 @@ use std::fs;
 use std::path::Path;
 use sysinfo::{Disks, Networks, System, Pid, Signal};
 use log::{info, warn, error};
+use bollard::Docker;
+use bollard::container::{ListContainersOptions, StopContainerOptions, RemoveContainerOptions, LogsOptions};
+use bollard::image::ListImagesOptions;
+use bollard::volume::ListVolumesOptions;
+use bollard::network::ListNetworksOptions;
+use futures_util::stream::StreamExt;
 
 // Shared application state
 struct AppState {
@@ -380,6 +386,7 @@ async fn kill_process(data: web::Data<AppState>, pid: web::Path<u32>) -> impl Re
 // Embedded dashboard HTML
 const DASHBOARD_HTML: &str = include_str!("dashboard.html");
 const NGINX_ADMIN_HTML: &str = include_str!("nginx_admin.html");
+const DOCKER_MANAGER_HTML: &str = include_str!("docker_manager.html");
 
 // Serve the dashboard HTML
 #[get("/dashboard")]
@@ -395,6 +402,14 @@ async fn nginx_admin() -> HttpResponse {
     HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
         .body(NGINX_ADMIN_HTML)
+}
+
+// Serve the docker manager HTML
+#[get("/docker")]
+async fn docker_manager() -> HttpResponse {
+    HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(DOCKER_MANAGER_HTML)
 }
 
 // ==================== Nginx Proxy Management ====================
@@ -710,6 +725,507 @@ async fn delete_nginx_proxy(name: web::Path<String>) -> impl Responder {
     }
 }
 
+// ==================== Docker Management ====================
+
+#[derive(Serialize)]
+struct DockerContainer {
+    id: String,
+    name: String,
+    image: String,
+    state: String,
+    status: String,
+    ports: String,
+    created: i64,
+}
+
+#[derive(Serialize)]
+struct DockerImage {
+    id: String,
+    repository: String,
+    tag: String,
+    size: i64,
+    created: i64,
+}
+
+#[derive(Serialize)]
+struct DockerVolume {
+    name: String,
+    driver: String,
+    mountpoint: String,
+    created: Option<i64>,
+}
+
+#[derive(Serialize)]
+struct DockerNetwork {
+    id: String,
+    name: String,
+    driver: String,
+    scope: String,
+    subnet: Option<String>,
+}
+
+#[derive(Serialize)]
+struct DockerResponse {
+    success: bool,
+    message: String,
+}
+
+#[derive(Serialize)]
+struct DockerLogsResponse {
+    logs: String,
+}
+
+async fn get_docker_client() -> Result<Docker, String> {
+    Docker::connect_with_socket_defaults()
+        .map_err(|e| format!("Docker connection failed: {}. Is Docker running?", e))
+}
+
+#[get("/api/docker/containers")]
+async fn list_containers() -> impl Responder {
+    info!("GET /api/docker/containers - Listing containers");
+    
+    let docker = match get_docker_client().await {
+        Ok(d) => d,
+        Err(e) => {
+            error!("{}", e);
+            return HttpResponse::InternalServerError().json(vec![] as Vec<DockerContainer>);
+        }
+    };
+    
+    let options = Some(ListContainersOptions::<String> {
+        all: true,
+        ..Default::default()
+    });
+    
+    match docker.list_containers(options).await {
+        Ok(containers) => {
+            let result: Vec<DockerContainer> = containers.iter().map(|c| {
+                let name = c.names.as_ref()
+                    .and_then(|n| n.first())
+                    .map(|s| s.trim_start_matches('/').to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                
+                let ports = c.ports.as_ref()
+                    .map(|p| p.iter()
+                        .filter_map(|port| {
+                            if let (Some(pub_port), Some(priv_port)) = (port.public_port, port.private_port) {
+                                Some(format!("{}:{}", pub_port, priv_port))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", "))
+                    .unwrap_or_default();
+                
+                DockerContainer {
+                    id: c.id.as_ref().unwrap_or(&String::new()).clone(),
+                    name,
+                    image: c.image.as_ref().unwrap_or(&String::new()).clone(),
+                    state: c.state.as_ref().unwrap_or(&String::new()).clone(),
+                    status: c.status.as_ref().unwrap_or(&String::new()).clone(),
+                    ports,
+                    created: c.created.unwrap_or(0),
+                }
+            }).collect();
+            
+            info!("Found {} containers", result.len());
+            HttpResponse::Ok().json(result)
+        },
+        Err(e) => {
+            error!("Failed to list containers: {}", e);
+            HttpResponse::InternalServerError().json(vec![] as Vec<DockerContainer>)
+        }
+    }
+}
+
+#[post("/api/docker/containers/{id}/start")]
+async fn start_container(id: web::Path<String>) -> impl Responder {
+    info!("POST /api/docker/containers/{}/start", id);
+    
+    let docker = match get_docker_client().await {
+        Ok(d) => d,
+        Err(e) => return HttpResponse::InternalServerError().json(DockerResponse {
+            success: false,
+            message: e,
+        }),
+    };
+    
+    match docker.start_container::<String>(&id, None).await {
+        Ok(_) => {
+            info!("Container {} started", id);
+            HttpResponse::Ok().json(DockerResponse {
+                success: true,
+                message: format!("✅ Container started successfully"),
+            })
+        },
+        Err(e) => {
+            error!("Failed to start container: {}", e);
+            HttpResponse::InternalServerError().json(DockerResponse {
+                success: false,
+                message: format!("Failed to start container: {}", e),
+            })
+        }
+    }
+}
+
+#[post("/api/docker/containers/{id}/stop")]
+async fn stop_container(id: web::Path<String>) -> impl Responder {
+    info!("POST /api/docker/containers/{}/stop", id);
+    
+    let docker = match get_docker_client().await {
+        Ok(d) => d,
+        Err(e) => return HttpResponse::InternalServerError().json(DockerResponse {
+            success: false,
+            message: e,
+        }),
+    };
+    
+    let options = Some(StopContainerOptions { t: 10 });
+    
+    match docker.stop_container(&id, options).await {
+        Ok(_) => {
+            info!("Container {} stopped", id);
+            HttpResponse::Ok().json(DockerResponse {
+                success: true,
+                message: format!("✅ Container stopped successfully"),
+            })
+        },
+        Err(e) => {
+            error!("Failed to stop container: {}", e);
+            HttpResponse::InternalServerError().json(DockerResponse {
+                success: false,
+                message: format!("Failed to stop container: {}", e),
+            })
+        }
+    }
+}
+
+#[post("/api/docker/containers/{id}/restart")]
+async fn restart_container(id: web::Path<String>) -> impl Responder {
+    info!("POST /api/docker/containers/{}/restart", id);
+    
+    let docker = match get_docker_client().await {
+        Ok(d) => d,
+        Err(e) => return HttpResponse::InternalServerError().json(DockerResponse {
+            success: false,
+            message: e,
+        }),
+    };
+    
+    match docker.restart_container(&id, None).await {
+        Ok(_) => {
+            info!("Container {} restarted", id);
+            HttpResponse::Ok().json(DockerResponse {
+                success: true,
+                message: format!("✅ Container restarted successfully"),
+            })
+        },
+        Err(e) => {
+            error!("Failed to restart container: {}", e);
+            HttpResponse::InternalServerError().json(DockerResponse {
+                success: false,
+                message: format!("Failed to restart container: {}", e),
+            })
+        }
+    }
+}
+
+#[delete("/api/docker/containers/{id}")]
+async fn remove_container(id: web::Path<String>) -> impl Responder {
+    info!("DELETE /api/docker/containers/{}", id);
+    
+    let docker = match get_docker_client().await {
+        Ok(d) => d,
+        Err(e) => return HttpResponse::InternalServerError().json(DockerResponse {
+            success: false,
+            message: e,
+        }),
+    };
+    
+    let options = Some(RemoveContainerOptions {
+        force: true,
+        ..Default::default()
+    });
+    
+    match docker.remove_container(&id, options).await {
+        Ok(_) => {
+            info!("Container {} removed", id);
+            HttpResponse::Ok().json(DockerResponse {
+                success: true,
+                message: format!("✅ Container removed successfully"),
+            })
+        },
+        Err(e) => {
+            error!("Failed to remove container: {}", e);
+            HttpResponse::InternalServerError().json(DockerResponse {
+                success: false,
+                message: format!("Failed to remove container: {}", e),
+            })
+        }
+    }
+}
+
+#[get("/api/docker/containers/{id}/logs")]
+async fn get_container_logs(id: web::Path<String>) -> impl Responder {
+    info!("GET /api/docker/containers/{}/logs", id);
+    
+    let docker = match get_docker_client().await {
+        Ok(d) => d,
+        Err(e) => return HttpResponse::InternalServerError().json(DockerLogsResponse {
+            logs: format!("Error: {}", e),
+        }),
+    };
+    
+    let options = Some(LogsOptions::<String> {
+        stdout: true,
+        stderr: true,
+        tail: "100".to_string(),
+        ..Default::default()
+    });
+    
+    match docker.logs(&id, options) {
+        logs_stream => {
+            let mut logs = String::new();
+            let mut stream = logs_stream;
+            
+            while let Some(log) = stream.next().await {
+                match log {
+                    Ok(output) => {
+                        logs.push_str(&output.to_string());
+                    },
+                    Err(e) => {
+                        error!("Error reading logs: {}", e);
+                        break;
+                    }
+                }
+            }
+            
+            HttpResponse::Ok().json(DockerLogsResponse { logs })
+        }
+    }
+}
+
+#[get("/api/docker/images")]
+async fn list_images() -> impl Responder {
+    info!("GET /api/docker/images - Listing images");
+    
+    let docker = match get_docker_client().await {
+        Ok(d) => d,
+        Err(e) => {
+            error!("{}", e);
+            return HttpResponse::InternalServerError().json(vec![] as Vec<DockerImage>);
+        }
+    };
+    
+    let options = Some(ListImagesOptions::<String> {
+        all: false,
+        ..Default::default()
+    });
+    
+    match docker.list_images(options).await {
+        Ok(images) => {
+            let result: Vec<DockerImage> = images.iter().map(|img| {
+                let repo_tags = img.repo_tags.as_ref()
+                    .and_then(|tags| tags.first())
+                    .unwrap_or(&"<none>:<none>".to_string())
+                    .clone();
+                
+                let parts: Vec<&str> = repo_tags.split(':').collect();
+                let repository = parts.get(0).unwrap_or(&"<none>").to_string();
+                let tag = parts.get(1).unwrap_or(&"<none>").to_string();
+                
+                DockerImage {
+                    id: img.id.clone(),
+                    repository,
+                    tag,
+                    size: img.size,
+                    created: img.created,
+                }
+            }).collect();
+            
+            info!("Found {} images", result.len());
+            HttpResponse::Ok().json(result)
+        },
+        Err(e) => {
+            error!("Failed to list images: {}", e);
+            HttpResponse::InternalServerError().json(vec![] as Vec<DockerImage>)
+        }
+    }
+}
+
+#[delete("/api/docker/images/{id}")]
+async fn remove_image(id: web::Path<String>) -> impl Responder {
+    info!("DELETE /api/docker/images/{}", id);
+    
+    let docker = match get_docker_client().await {
+        Ok(d) => d,
+        Err(e) => return HttpResponse::InternalServerError().json(DockerResponse {
+            success: false,
+            message: e,
+        }),
+    };
+    
+    match docker.remove_image(&id, None, None).await {
+        Ok(_) => {
+            info!("Image {} removed", id);
+            HttpResponse::Ok().json(DockerResponse {
+                success: true,
+                message: format!("✅ Image removed successfully"),
+            })
+        },
+        Err(e) => {
+            error!("Failed to remove image: {}", e);
+            HttpResponse::InternalServerError().json(DockerResponse {
+                success: false,
+                message: format!("Failed to remove image: {}", e),
+            })
+        }
+    }
+}
+
+#[get("/api/docker/volumes")]
+async fn list_volumes() -> impl Responder {
+    info!("GET /api/docker/volumes - Listing volumes");
+    
+    let docker = match get_docker_client().await {
+        Ok(d) => d,
+        Err(e) => {
+            error!("{}", e);
+            return HttpResponse::InternalServerError().json(vec![] as Vec<DockerVolume>);
+        }
+    };
+    
+    let options = ListVolumesOptions::<String> {
+        ..Default::default()
+    };
+    
+    match docker.list_volumes(Some(options)).await {
+        Ok(response) => {
+            let result: Vec<DockerVolume> = response.volumes.unwrap_or_default().iter().map(|vol| {
+                DockerVolume {
+                    name: vol.name.clone(),
+                    driver: vol.driver.clone(),
+                    mountpoint: vol.mountpoint.clone(),
+                    created: None,
+                }
+            }).collect();
+            
+            info!("Found {} volumes", result.len());
+            HttpResponse::Ok().json(result)
+        },
+        Err(e) => {
+            error!("Failed to list volumes: {}", e);
+            HttpResponse::InternalServerError().json(vec![] as Vec<DockerVolume>)
+        }
+    }
+}
+
+#[delete("/api/docker/volumes/{name}")]
+async fn remove_volume(name: web::Path<String>) -> impl Responder {
+    info!("DELETE /api/docker/volumes/{}", name);
+    
+    let docker = match get_docker_client().await {
+        Ok(d) => d,
+        Err(e) => return HttpResponse::InternalServerError().json(DockerResponse {
+            success: false,
+            message: e,
+        }),
+    };
+    
+    match docker.remove_volume(&name, None).await {
+        Ok(_) => {
+            info!("Volume {} removed", name);
+            HttpResponse::Ok().json(DockerResponse {
+                success: true,
+                message: format!("✅ Volume removed successfully"),
+            })
+        },
+        Err(e) => {
+            error!("Failed to remove volume: {}", e);
+            HttpResponse::InternalServerError().json(DockerResponse {
+                success: false,
+                message: format!("Failed to remove volume: {}", e),
+            })
+        }
+    }
+}
+
+#[get("/api/docker/networks")]
+async fn list_networks() -> impl Responder {
+    info!("GET /api/docker/networks - Listing networks");
+    
+    let docker = match get_docker_client().await {
+        Ok(d) => d,
+        Err(e) => {
+            error!("{}", e);
+            return HttpResponse::InternalServerError().json(vec![] as Vec<DockerNetwork>);
+        }
+    };
+    
+    let options = ListNetworksOptions::<String> {
+        ..Default::default()
+    };
+    
+    match docker.list_networks(Some(options)).await {
+        Ok(networks) => {
+            let result: Vec<DockerNetwork> = networks.iter().map(|net| {
+                let subnet = net.ipam.as_ref()
+                    .and_then(|ipam| ipam.config.as_ref())
+                    .and_then(|configs| configs.first())
+                    .and_then(|config| config.get("Subnet"))
+                    .and_then(|s| s.as_str())
+                    .map(|s| s.to_string());
+                
+                DockerNetwork {
+                    id: net.id.as_ref().unwrap_or(&String::new()).clone(),
+                    name: net.name.as_ref().unwrap_or(&String::new()).clone(),
+                    driver: net.driver.as_ref().unwrap_or(&String::new()).clone(),
+                    scope: net.scope.as_ref().unwrap_or(&String::new()).clone(),
+                    subnet,
+                }
+            }).collect();
+            
+            info!("Found {} networks", result.len());
+            HttpResponse::Ok().json(result)
+        },
+        Err(e) => {
+            error!("Failed to list networks: {}", e);
+            HttpResponse::InternalServerError().json(vec![] as Vec<DockerNetwork>)
+        }
+    }
+}
+
+#[delete("/api/docker/networks/{id}")]
+async fn remove_network(id: web::Path<String>) -> impl Responder {
+    info!("DELETE /api/docker/networks/{}", id);
+    
+    let docker = match get_docker_client().await {
+        Ok(d) => d,
+        Err(e) => return HttpResponse::InternalServerError().json(DockerResponse {
+            success: false,
+            message: e,
+        }),
+    };
+    
+    match docker.remove_network(&id).await {
+        Ok(_) => {
+            info!("Network {} removed", id);
+            HttpResponse::Ok().json(DockerResponse {
+                success: true,
+                message: format!("✅ Network removed successfully"),
+            })
+        },
+        Err(e) => {
+            error!("Failed to remove network: {}", e);
+            HttpResponse::InternalServerError().json(DockerResponse {
+                success: false,
+                message: format!("Failed to remove network: {}", e),
+            })
+        }
+    }
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     // Initialize logger
@@ -731,11 +1247,13 @@ async fn main() -> std::io::Result<()> {
     println!("🚀 Ubuntu Resource API starting on http://{}", bind_addr);
     println!("📊 Dashboard: http://{}/dashboard", bind_addr);
     println!("🔄 Nginx Manager: http://{}/nginx", bind_addr);
+    println!("🐳 Docker Manager: http://{}/docker", bind_addr);
     println!("");
     println!("📡 Available endpoints:");
     println!("   GET    /           - API info");
     println!("   GET    /dashboard  - Web dashboard");
     println!("   GET    /nginx      - Nginx proxy manager");
+    println!("   GET    /docker     - Docker container manager");
     println!("   GET    /api/system - System information");
     println!("   GET    /api/cpu    - CPU information");
     println!("   GET    /api/cpu/usage - CPU usage statistics");
@@ -749,6 +1267,18 @@ async fn main() -> std::io::Result<()> {
     println!("   GET    /api/nginx/proxies - List nginx proxies");
     println!("   POST   /api/nginx/proxies - Create nginx proxy");
     println!("   DELETE /api/nginx/proxies/:name - Delete nginx proxy");
+    println!("   GET    /api/docker/containers - List containers");
+    println!("   POST   /api/docker/containers/:id/start - Start container");
+    println!("   POST   /api/docker/containers/:id/stop - Stop container");
+    println!("   POST   /api/docker/containers/:id/restart - Restart container");
+    println!("   DELETE /api/docker/containers/:id - Remove container");
+    println!("   GET    /api/docker/containers/:id/logs - Get container logs");
+    println!("   GET    /api/docker/images - List images");
+    println!("   DELETE /api/docker/images/:id - Remove image");
+    println!("   GET    /api/docker/volumes - List volumes");
+    println!("   DELETE /api/docker/volumes/:name - Remove volume");
+    println!("   GET    /api/docker/networks - List networks");
+    println!("   DELETE /api/docker/networks/:id - Remove network");
 
     HttpServer::new(move || {
         App::new()
@@ -757,6 +1287,7 @@ async fn main() -> std::io::Result<()> {
             .service(index)
             .service(dashboard)
             .service(nginx_admin)
+            .service(docker_manager)
             .service(get_system_info)
             .service(get_cpu_info)
             .service(get_cpu_usage)
@@ -770,6 +1301,18 @@ async fn main() -> std::io::Result<()> {
             .service(get_nginx_proxies)
             .service(create_nginx_proxy)
             .service(delete_nginx_proxy)
+            .service(list_containers)
+            .service(start_container)
+            .service(stop_container)
+            .service(restart_container)
+            .service(remove_container)
+            .service(get_container_logs)
+            .service(list_images)
+            .service(remove_image)
+            .service(list_volumes)
+            .service(remove_volume)
+            .service(list_networks)
+            .service(remove_network)
     })
     .bind(&bind_addr)?
     .run()
