@@ -446,7 +446,7 @@ const NGINX_SITES_ENABLED: &str = "/etc/nginx/sites-enabled";
 
 fn format_nginx_config(config: &str) -> String {
     let mut formatted = String::new();
-    let mut indent_level = 0;
+    let mut indent_level: i32 = 0;
     let indent = "    "; // 4 spaces
     
     for line in config.lines() {
@@ -675,7 +675,8 @@ async fn get_nginx_proxies() -> impl Responder {
 
 #[post("/api/nginx/proxies")]
 async fn create_nginx_proxy(proxy: web::Json<NginxProxy>) -> impl Responder {
-    info!("POST /api/nginx/proxies - Creating proxy: {} -> {}", proxy.domain, proxy.backend);
+    let proxy_domain = proxy.domain.clone();
+    info!("POST /api/nginx/proxies - Creating proxy: {} -> {}", proxy_domain, proxy.backend);
     
     // Validate and format extra_config if provided
     let validated_proxy = if let Some(extra) = &proxy.extra_config {
@@ -803,7 +804,7 @@ async fn create_nginx_proxy(proxy: web::Json<NginxProxy>) -> impl Responder {
                                     info!("Nginx reloaded successfully");
                                     HttpResponse::Ok().json(NginxResponse {
                                         success: true,
-                                        message: format!("✅ {} proxy konfiqurasiyası yaradıldı və aktiv edildi", proxy.domain),
+                                        message: format!("✅ {} proxy konfiqurasiyası yaradıldı və aktiv edildi", validated_proxy.domain),
                                     })
                                 } else {
                                     let reload_err = String::from_utf8_lossy(&reload_result.stderr);
