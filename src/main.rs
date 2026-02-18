@@ -1,6 +1,8 @@
-use actix_web::{delete, get, web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{delete, get, post, web, App, HttpResponse, HttpServer, Responder};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
+use std::fs;
+use std::path::Path;
 use sysinfo::{Disks, Networks, System, Pid, Signal};
 
 // Shared application state
@@ -374,10 +376,9 @@ async fn kill_process(data: web::Data<AppState>, pid: web::Path<u32>) -> impl Re
     }
 }
 
-// ==================== Main ====================
-
 // Embedded dashboard HTML
 const DASHBOARD_HTML: &str = include_str!("dashboard.html");
+const NGINX_ADMIN_HTML: &str = include_str!("nginx_admin.html");
 
 // Serve the dashboard HTML
 #[get("/dashboard")]
@@ -385,6 +386,224 @@ async fn dashboard() -> HttpResponse {
     HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
         .body(DASHBOARD_HTML)
+}
+
+// Serve the nginx admin HTML
+#[get("/nginx")]
+async fn nginx_admin() -> HttpResponse {
+    HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(NGINX_ADMIN_HTML)
+}
+
+// ==================== Nginx Proxy Management ====================
+
+#[derive(Serialize, Deserialize, Clone)]
+struct NginxProxy {
+    name: String,
+    domain: String,
+    backend: String,
+    ssl: bool,
+    extra_config: Option<String>,
+}
+
+#[derive(Serialize)]
+struct NginxResponse {
+    success: bool,
+    message: String,
+}
+
+const NGINX_SITES_AVAILABLE: &str = "/etc/nginx/sites-available";
+const NGINX_SITES_ENABLED: &str = "/etc/nginx/sites-enabled";
+
+fn generate_nginx_config(proxy: &NginxProxy) -> String {
+    let ssl_config = if proxy.ssl {
+        format!(r#"
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    
+    # SSL sertifikatları (Let's Encrypt və ya özəl)
+    # ssl_certificate /etc/letsencrypt/live/{}/fullchain.pem;
+    # ssl_certificate_key /etc/letsencrypt/live/{}/privkey.pem;
+    
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;"#, proxy.domain, proxy.domain)
+    } else {
+        "    listen 80;\n    listen [::]:80;".to_string()
+    };
+
+    let extra = proxy.extra_config.as_ref()
+        .map(|e| format!("\n    # Əlavə konfiqurasiya\n    {}", e))
+        .unwrap_or_default();
+
+    format!(r#"# Nginx Reverse Proxy - {}
+# Yaradılma: {}
+# Backend: {}
+
+server {{
+{}
+    server_name {};
+
+    location / {{
+        proxy_pass {};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;{}
+    }}
+}}
+"#, proxy.name, chrono::Local::now().format("%Y-%m-%d %H:%M:%S"), proxy.backend, ssl_config, proxy.domain, proxy.backend, extra)
+}
+
+#[get("/api/nginx/proxies")]
+async fn get_nginx_proxies() -> impl Responder {
+    let mut proxies = Vec::new();
+    
+    if let Ok(entries) = fs::read_dir(NGINX_SITES_AVAILABLE) {
+        for entry in entries.flatten() {
+            if let Ok(content) = fs::read_to_string(entry.path()) {
+                // Parse basic info from config file
+                if let Some(name) = entry.file_name().to_str() {
+                    let domain = content.lines()
+                        .find(|l| l.trim().starts_with("server_name"))
+                        .and_then(|l| l.split_whitespace().nth(1))
+                        .unwrap_or("unknown")
+                        .trim_end_matches(';')
+                        .to_string();
+                    
+                    let backend = content.lines()
+                        .find(|l| l.trim().starts_with("proxy_pass"))
+                        .and_then(|l| l.split_whitespace().nth(1))
+                        .unwrap_or("unknown")
+                        .trim_end_matches(';')
+                        .to_string();
+                    
+                    let ssl = content.contains("listen 443 ssl");
+                    
+                    proxies.push(NginxProxy {
+                        name: name.to_string(),
+                        domain,
+                        backend,
+                        ssl,
+                        extra_config: None,
+                    });
+                }
+            }
+        }
+    }
+    
+    HttpResponse::Ok().json(proxies)
+}
+
+#[post("/api/nginx/proxies")]
+async fn create_nginx_proxy(proxy: web::Json<NginxProxy>) -> impl Responder {
+    let config_path = format!("{}/{}", NGINX_SITES_AVAILABLE, proxy.name);
+    let enabled_path = format!("{}/{}", NGINX_SITES_ENABLED, proxy.name);
+    
+    // Generate nginx config
+    let config_content = generate_nginx_config(&proxy);
+    
+    // Write config file
+    match fs::write(&config_path, config_content) {
+        Ok(_) => {
+            // Create symlink to enable
+            if Path::new(&enabled_path).exists() {
+                let _ = fs::remove_file(&enabled_path);
+            }
+            
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::symlink;
+                if let Err(e) = symlink(&config_path, &enabled_path) {
+                    return HttpResponse::InternalServerError().json(NginxResponse {
+                        success: false,
+                        message: format!("Symlink yaradıla bilmədi: {}", e),
+                    });
+                }
+            }
+            
+            // Test nginx config
+            let output = std::process::Command::new("nginx")
+                .args(&["-t"])
+                .output();
+            
+            match output {
+                Ok(result) if result.status.success() => {
+                    // Reload nginx
+                    let reload = std::process::Command::new("systemctl")
+                        .args(&["reload", "nginx"])
+                        .output();
+                    
+                    match reload {
+                        Ok(_) => HttpResponse::Ok().json(NginxResponse {
+                            success: true,
+                            message: format!("✅ {} proxy konfiqurasiyası yaradıldı və aktiv edildi", proxy.domain),
+                        }),
+                        Err(e) => HttpResponse::InternalServerError().json(NginxResponse {
+                            success: false,
+                            message: format!("Nginx reload edilə bilmədi: {}", e),
+                        }),
+                    }
+                },
+                _ => {
+                    // Rollback on error
+                    let _ = fs::remove_file(&config_path);
+                    let _ = fs::remove_file(&enabled_path);
+                    HttpResponse::BadRequest().json(NginxResponse {
+                        success: false,
+                        message: "Nginx konfiqurasiya xətası. Yoxlanıldı və geri alındı.".to_string(),
+                    })
+                }
+            }
+        },
+        Err(e) => HttpResponse::InternalServerError().json(NginxResponse {
+            success: false,
+            message: format!("Fayl yazıla bilmədi: {}. Root icazəsi lazımdır.", e),
+        }),
+    }
+}
+
+#[delete("/api/nginx/proxies/{name}")]
+async fn delete_nginx_proxy(name: web::Path<String>) -> impl Responder {
+    let config_path = format!("{}/{}", NGINX_SITES_AVAILABLE, name.as_str());
+    let enabled_path = format!("{}/{}", NGINX_SITES_ENABLED, name.as_str());
+    
+    // Remove symlink
+    if Path::new(&enabled_path).exists() {
+        if let Err(e) = fs::remove_file(&enabled_path) {
+            return HttpResponse::InternalServerError().json(NginxResponse {
+                success: false,
+                message: format!("Enabled link silinə bilmədi: {}", e),
+            });
+        }
+    }
+    
+    // Remove config file
+    match fs::remove_file(&config_path) {
+        Ok(_) => {
+            // Reload nginx
+            let _ = std::process::Command::new("systemctl")
+                .args(&["reload", "nginx"])
+                .output();
+            
+            HttpResponse::Ok().json(NginxResponse {
+                success: true,
+                message: format!("✅ {} proxy konfiqurasiyası silindi", name.as_str()),
+            })
+        },
+        Err(e) => HttpResponse::InternalServerError().json(NginxResponse {
+            success: false,
+            message: format!("Silinə bilmədi: {}", e),
+        }),
+    }
 }
 
 #[actix_web::main]
@@ -403,10 +622,12 @@ async fn main() -> std::io::Result<()> {
 
     println!("🚀 Ubuntu Resource API starting on http://{}", bind_addr);
     println!("📊 Dashboard: http://{}/dashboard", bind_addr);
+    println!("🔄 Nginx Manager: http://{}/nginx", bind_addr);
     println!("");
     println!("📡 Available endpoints:");
     println!("   GET    /           - API info");
     println!("   GET    /dashboard  - Web dashboard");
+    println!("   GET    /nginx      - Nginx proxy manager");
     println!("   GET    /api/system - System information");
     println!("   GET    /api/cpu    - CPU information");
     println!("   GET    /api/cpu/usage - CPU usage statistics");
@@ -417,12 +638,16 @@ async fn main() -> std::io::Result<()> {
     println!("   GET    /api/load   - System load average");
     println!("   GET    /health     - Health check");
     println!("   DELETE /api/processes/:pid - Kill process by PID");
+    println!("   GET    /api/nginx/proxies - List nginx proxies");
+    println!("   POST   /api/nginx/proxies - Create nginx proxy");
+    println!("   DELETE /api/nginx/proxies/:name - Delete nginx proxy");
 
     HttpServer::new(move || {
         App::new()
             .app_data(app_state.clone())
             .service(index)
             .service(dashboard)
+            .service(nginx_admin)
             .service(get_system_info)
             .service(get_cpu_info)
             .service(get_cpu_usage)
@@ -433,6 +658,9 @@ async fn main() -> std::io::Result<()> {
             .service(get_load_average)
             .service(health_check)
             .service(kill_process)
+            .service(get_nginx_proxies)
+            .service(create_nginx_proxy)
+            .service(delete_nginx_proxy)
     })
     .bind(&bind_addr)?
     .run()

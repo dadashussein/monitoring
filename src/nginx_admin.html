@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nginx Reverse Proxy Manager</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-primary: #0f0f1a;
+            --bg-secondary: #1a1a2e;
+            --bg-card: #16162a;
+            --bg-hover: #252545;
+            --text-primary: #ffffff;
+            --text-secondary: #a0a0b8;
+            --accent-cyan: #00d4ff;
+            --accent-green: #00ff88;
+            --accent-red: #ff4444;
+            --accent-purple: #a855f7;
+            --border-color: #2a2a45;
+            --shadow: 0 4px 6px -1px rgba(0,0,0,0.3);
+            --radius: 12px;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px; padding-bottom: 20px; border-bottom: 1px solid var(--border-color); }
+        .brand { display: flex; align-items: center; gap: 16px; }
+        .logo { width: 48px; height: 48px; background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple)); border-radius: var(--radius); display: flex; align-items: center; justify-content: center; font-size: 24px; }
+        h1 { font-size: 1.5rem; font-weight: 700; }
+        .btn { background: var(--bg-card); border: 1px solid var(--border-color); color: var(--text-primary); padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 0.875rem; transition: all 0.2s; }
+        .btn:hover { background: var(--bg-hover); border-color: var(--accent-cyan); }
+        .btn-primary { background: var(--accent-cyan); color: #000; border-color: var(--accent-cyan); font-weight: 600; }
+        .btn-primary:hover { background: #00b8e6; }
+        .btn-danger { background: var(--accent-red); color: #fff; border-color: var(--accent-red); }
+        .btn-danger:hover { background: #ff2222; }
+        .card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius); padding: 24px; margin-bottom: 24px; box-shadow: var(--shadow); }
+        .proxy-list { display: grid; gap: 16px; }
+        .proxy-item { background: var(--bg-secondary); padding: 20px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; transition: all 0.2s; }
+        .proxy-item:hover { background: var(--bg-hover); }
+        .proxy-info h3 { font-size: 1.125rem; margin-bottom: 8px; }
+        .proxy-meta { font-size: 0.875rem; color: var(--text-secondary); }
+        .proxy-actions { display: flex; gap: 8px; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; align-items: center; justify-content: center; }
+        .modal.active { display: flex; }
+        .modal-content { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius); padding: 32px; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+        .modal-header h2 { font-size: 1.25rem; }
+        .close-btn { background: none; border: none; color: var(--text-secondary); font-size: 1.5rem; cursor: pointer; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 8px; font-weight: 500; font-size: 0.875rem; }
+        .form-group input, .form-group textarea, .form-group select { width: 100%; background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary); padding: 10px; border-radius: 8px; font-family: 'JetBrains Mono', monospace; font-size: 0.875rem; }
+        .form-group textarea { min-height: 200px; font-family: 'JetBrains Mono', monospace; }
+        .form-actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px; }
+        .badge { padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
+        .badge-active { background: rgba(0,255,136,0.15); color: var(--accent-green); }
+        .badge-inactive { background: rgba(255,68,68,0.15); color: var(--accent-red); }
+        .error-message { background: rgba(255,68,68,0.1); border: 1px solid var(--accent-red); color: var(--accent-red); padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; }
+        .success-message { background: rgba(0,255,136,0.1); border: 1px solid var(--accent-green); color: var(--accent-green); padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; }
+        code { background: var(--bg-secondary); padding: 2px 6px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 0.875rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="brand">
+                <div class="logo">🔄</div>
+                <div>
+                    <h1>Nginx Reverse Proxy Manager</h1>
+                    <p style="color: var(--text-secondary); font-size: 0.875rem;">Reverse proxy konfiqurasiyalarını idarə edin</p>
+                </div>
+            </div>
+            <div style="display: flex; gap: 12px;">
+                <button class="btn" onclick="window.location.href='/dashboard'">📊 Resource Monitor</button>
+                <button class="btn btn-primary" onclick="openAddModal()">+ Yeni Proxy</button>
+            </div>
+        </header>
+
+        <div id="message-container"></div>
+
+        <div class="card">
+            <h2 style="margin-bottom: 20px;">Aktiv Proxy Konfiqurasiyaları</h2>
+            <div class="proxy-list" id="proxy-list">
+                <p style="color: var(--text-secondary);">Yüklənir...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add/Edit Modal -->
+    <div class="modal" id="proxy-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modal-title">Yeni Proxy</h2>
+                <button class="close-btn" onclick="closeModal()">&times;</button>
+            </div>
+            <form id="proxy-form" onsubmit="saveProxy(event)">
+                <input type="hidden" id="proxy-id">
+                <div class="form-group">
+                    <label>Konfiqurasiya Adı</label>
+                    <input type="text" id="proxy-name" placeholder="my-app" required>
+                </div>
+                <div class="form-group">
+                    <label>Domain</label>
+                    <input type="text" id="proxy-domain" placeholder="app.example.com" required>
+                </div>
+                <div class="form-group">
+                    <label>Backend URL</label>
+                    <input type="text" id="proxy-backend" placeholder="http://localhost:3000" required>
+                </div>
+                <div class="form-group">
+                    <label>SSL/TLS</label>
+                    <select id="proxy-ssl">
+                        <option value="false">HTTP (Port 80)</option>
+                        <option value="true">HTTPS (Port 443)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Əlavə Konfiqurasiya (opsional)</label>
+                    <textarea id="proxy-extra" placeholder="# Əlavə nginx direktiv&#10;client_max_body_size 100M;"></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn" onclick="closeModal()">Ləğv et</button>
+                    <button type="submit" class="btn btn-primary">Yadda saxla</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+
+        function showMessage(message, type = 'success') {
+            const container = document.getElementById('message-container');
+            const className = type === 'success' ? 'success-message' : 'error-message';
+            container.innerHTML = `<div class="${className}">${message}</div>`;
+            setTimeout(() => container.innerHTML = '', 5000);
+        }
+
+        async function loadProxies() {
+            try {
+                const response = await fetch(`${API_BASE}/api/nginx/proxies`);
+                const proxies = await response.json();
+                const list = document.getElementById('proxy-list');
+                
+                if (proxies.length === 0) {
+                    list.innerHTML = '<p style="color: var(--text-secondary);">Heç bir proxy konfiqurasiyası yoxdur. Yeni əlavə edin.</p>';
+                    return;
+                }
+                
+                list.innerHTML = proxies.map(proxy => `
+                    <div class="proxy-item">
+                        <div class="proxy-info">
+                            <h3>${proxy.domain}</h3>
+                            <div class="proxy-meta">
+                                <code>${proxy.name}</code> → <code>${proxy.backend}</code>
+                                ${proxy.ssl ? '<span class="badge badge-active">HTTPS</span>' : '<span class="badge badge-inactive">HTTP</span>'}
+                            </div>
+                        </div>
+                        <div class="proxy-actions">
+                            <button class="btn" onclick='editProxy(${JSON.stringify(proxy)})'>✏️ Düzəliş</button>
+                            <button class="btn btn-danger" onclick="deleteProxy('${proxy.name}', '${proxy.domain}')">🗑️ Sil</button>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                showMessage('Proxy konfiqurasiyaları yüklənə bilmədi: ' + error.message, 'error');
+            }
+        }
+
+        function openAddModal() {
+            document.getElementById('modal-title').textContent = 'Yeni Proxy';
+            document.getElementById('proxy-form').reset();
+            document.getElementById('proxy-id').value = '';
+            document.getElementById('proxy-modal').classList.add('active');
+        }
+
+        function editProxy(proxy) {
+            document.getElementById('modal-title').textContent = 'Proxy Düzəliş';
+            document.getElementById('proxy-id').value = proxy.name;
+            document.getElementById('proxy-name').value = proxy.name;
+            document.getElementById('proxy-domain').value = proxy.domain;
+            document.getElementById('proxy-backend').value = proxy.backend;
+            document.getElementById('proxy-ssl').value = proxy.ssl.toString();
+            document.getElementById('proxy-extra').value = proxy.extra_config || '';
+            document.getElementById('proxy-modal').classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('proxy-modal').classList.remove('active');
+        }
+
+        async function saveProxy(event) {
+            event.preventDefault();
+            
+            const data = {
+                name: document.getElementById('proxy-name').value,
+                domain: document.getElementById('proxy-domain').value,
+                backend: document.getElementById('proxy-backend').value,
+                ssl: document.getElementById('proxy-ssl').value === 'true',
+                extra_config: document.getElementById('proxy-extra').value || null
+            };
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/nginx/proxies`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showMessage(result.message);
+                    closeModal();
+                    loadProxies();
+                } else {
+                    showMessage(result.message || 'Xəta baş verdi', 'error');
+                }
+            } catch (error) {
+                showMessage('Yadda saxlanıla bilmədi: ' + error.message, 'error');
+            }
+        }
+
+        async function deleteProxy(name, domain) {
+            if (!confirm(`${domain} proxy konfiqurasiyasını silmək istədiyinizdən əminsiniz?`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/nginx/proxies/${name}`, {
+                    method: 'DELETE'
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showMessage(result.message);
+                    loadProxies();
+                } else {
+                    showMessage(result.message || 'Silinə bilmədi', 'error');
+                }
+            } catch (error) {
+                showMessage('Silinə bilmədi: ' + error.message, 'error');
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', loadProxies);
+    </script>
+</body>
+</html>
