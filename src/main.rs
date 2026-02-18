@@ -6,11 +6,11 @@ use std::path::Path;
 use sysinfo::{Disks, Networks, System, Pid, Signal};
 use log::{info, warn, error};
 use bollard::Docker;
-use bollard::container::{ListContainersOptions, StopContainerOptions, RemoveContainerOptions, LogsOptions};
+use bollard::container::{ListContainersOptions, StopContainerOptions, RemoveContainerOptions, LogsOptions, StatsOptions};
 use bollard::image::ListImagesOptions;
 use bollard::volume::ListVolumesOptions;
 use bollard::network::ListNetworksOptions;
-use futures_util::stream::StreamExt;
+use futures_util::stream::{StreamExt, TryStreamExt};
 
 // Shared application state
 struct AppState {
@@ -736,6 +736,9 @@ struct DockerContainer {
     status: String,
     ports: String,
     created: i64,
+    memory_usage: Option<u64>,
+    memory_limit: Option<u64>,
+    memory_percent: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -799,7 +802,9 @@ async fn list_containers() -> impl Responder {
     
     match docker.list_containers(options).await {
         Ok(containers) => {
-            let result: Vec<DockerContainer> = containers.iter().map(|c| {
+            let mut result: Vec<DockerContainer> = Vec::new();
+            
+            for c in containers.iter() {
                 let name = c.names.as_ref()
                     .and_then(|n| n.first())
                     .map(|s| s.trim_start_matches('/').to_string())
@@ -817,16 +822,41 @@ async fn list_containers() -> impl Responder {
                         .join(", "))
                     .unwrap_or_default();
                 
-                DockerContainer {
-                    id: c.id.as_ref().unwrap_or(&String::new()).clone(),
+                let container_id = c.id.as_ref().unwrap_or(&String::new()).clone();
+                let state = c.state.as_ref().unwrap_or(&String::new()).clone();
+                
+                // Fetch memory stats for running containers
+                let (memory_usage, memory_limit, memory_percent) = if state == "running" {
+                    match docker.stats(&container_id, Some(StatsOptions { stream: false, one_shot: true })).try_next().await {
+                        Ok(Some(stats)) => {
+                            let mem_usage = stats.memory_stats.usage.unwrap_or(0);
+                            let mem_limit = stats.memory_stats.limit.unwrap_or(0);
+                            let mem_percent = if mem_limit > 0 {
+                                (mem_usage as f64 / mem_limit as f64) * 100.0
+                            } else {
+                                0.0
+                            };
+                            (Some(mem_usage), Some(mem_limit), Some(mem_percent))
+                        },
+                        _ => (None, None, None)
+                    }
+                } else {
+                    (None, None, None)
+                };
+                
+                result.push(DockerContainer {
+                    id: container_id,
                     name,
                     image: c.image.as_ref().unwrap_or(&String::new()).clone(),
-                    state: c.state.as_ref().unwrap_or(&String::new()).clone(),
+                    state,
                     status: c.status.as_ref().unwrap_or(&String::new()).clone(),
                     ports,
                     created: c.created.unwrap_or(0),
-                }
-            }).collect();
+                    memory_usage,
+                    memory_limit,
+                    memory_percent,
+                });
+            }
             
             info!("Found {} containers", result.len());
             HttpResponse::Ok().json(result)
@@ -1014,7 +1044,7 @@ async fn list_images() -> impl Responder {
     };
     
     let options = Some(ListImagesOptions::<String> {
-        all: false,
+        all: true,
         ..Default::default()
     });
     

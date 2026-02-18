@@ -1,5 +1,5 @@
 # Build binary using Docker
-FROM rust:1.83-slim
+FROM rust:1.88-slim
 
 WORKDIR /app
 

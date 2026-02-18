@@ -215,6 +215,30 @@
             return `<span class="badge ${badges[state] || 'badge-exited'}">${state}</span>`;
         }
 
+        function formatMemoryUsage(container) {
+            if (!container.memory_usage || !container.memory_limit) {
+                return '<span style="color: var(--text-secondary); font-size: 0.75rem;">-</span>';
+            }
+            
+            const usageStr = formatBytes(container.memory_usage);
+            const limitStr = formatBytes(container.memory_limit);
+            const percent = container.memory_percent ? container.memory_percent.toFixed(1) : '0.0';
+            
+            let color = 'var(--accent-green)';
+            if (container.memory_percent > 80) {
+                color = 'var(--accent-red)';
+            } else if (container.memory_percent > 60) {
+                color = 'var(--accent-yellow)';
+            }
+            
+            return `
+                <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;">
+                    <div style="color: ${color}; font-weight: 600;">${usageStr} / ${limitStr}</div>
+                    <div style="color: var(--text-secondary); font-size: 0.7rem;">${percent}%</div>
+                </div>
+            `;
+        }
+
         async function loadContainers() {
             try {
                 const response = await fetch(`${API_BASE}/api/docker/containers`);
@@ -236,6 +260,7 @@
                             <th>Name</th>
                             <th>Image</th>
                             <th>Status</th>
+                            <th>Memory Usage</th>
                             <th>Ports</th>
                             <th>Created</th>
                             <th>Actions</th>
@@ -247,6 +272,7 @@
                                 <td><code>${c.name}</code></td>
                                 <td>${c.image}</td>
                                 <td>${getStatusBadge(c.state)}</td>
+                                <td>${formatMemoryUsage(c)}</td>
                                 <td style="font-size: 0.75rem;">${c.ports || '-'}</td>
                                 <td style="font-size: 0.75rem;">${formatDate(c.created)}</td>
                                 <td>
