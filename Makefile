@@ -9,12 +9,7 @@ build:
 	@echo "🔨 Building binary with Docker..."
 	docker build --network=host -t ubuntu-resource-api-builder .
 	@mkdir -p target/release
-	docker run --rm -v $(PWD)/target/release:/output ubuntu-resource-api-builder sh -c "cp /app/target/release/ubuntu_resource_api /output/ 2>/dev/null || echo '⚠️  Binary not found in container, rebuilding...'"
-	@if [ ! -f ./target/release/ubuntu_resource_api ]; then \
-		echo "🔄 Forcing rebuild without cache..."; \
-		docker build --no-cache --network=host -t ubuntu-resource-api-builder .; \
-		docker run --rm -v $(PWD)/target/release:/output ubuntu-resource-api-builder sh -c "cp /app/target/release/ubuntu_resource_api /output/"; \
-	fi
+	docker run --rm -v $(CURDIR)/target/release:/output ubuntu-resource-api-builder sh -c "cp /ubuntu_resource_api /output/ubuntu_resource_api"
 	chmod +x ./target/release/ubuntu_resource_api
 	@echo "✅ Binary created: ./target/release/ubuntu_resource_api"
 
