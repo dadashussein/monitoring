@@ -1,5 +1,11 @@
 FROM debian:bookworm-slim
 
+# Install nginx and systemctl for config management
+RUN apt-get update && \
+    apt-get install -y nginx systemctl && \
+    rm -rf /var/lib/apt/lists/* && \
+    mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
+
 WORKDIR /app
 
 # Copy the compiled binary
@@ -8,6 +14,12 @@ RUN chmod +x /app/ubuntu_resource_api
 
 # Expose port
 EXPOSE 3012
+
+# Set environment for logging
+ENV RUST_LOG=info
+
+# Run as root to access nginx configs
+USER root
 
 # Run the application (listen on all interfaces inside container)
 CMD ["/app/ubuntu_resource_api", "0.0.0.0", "3012"]

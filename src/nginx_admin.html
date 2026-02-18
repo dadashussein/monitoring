@@ -144,10 +144,20 @@
         async function loadProxies() {
             try {
                 const response = await fetch(`${API_BASE}/api/nginx/proxies`);
-                const proxies = await response.json();
+                const data = await response.json();
+                
+                // Check if response has warning or error
+                if (data.warning) {
+                    showMessage(data.warning, 'error');
+                }
+                if (data.error) {
+                    showMessage(data.error, 'error');
+                }
+                
+                const proxies = data.proxies || data;
                 const list = document.getElementById('proxy-list');
                 
-                if (proxies.length === 0) {
+                if (!Array.isArray(proxies) || proxies.length === 0) {
                     list.innerHTML = '<p style="color: var(--text-secondary);">Heç bir proxy konfiqurasiyası yoxdur. Yeni əlavə edin.</p>';
                     return;
                 }
@@ -168,6 +178,7 @@
                     </div>
                 `).join('');
             } catch (error) {
+                console.error('Load error:', error);
                 showMessage('Proxy konfiqurasiyaları yüklənə bilmədi: ' + error.message, 'error');
             }
         }

@@ -1,9 +1,10 @@
-use actix_web::{delete, get, post, web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{delete, get, post, web, App, HttpResponse, HttpServer, Responder, middleware};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use std::fs;
 use std::path::Path;
 use sysinfo::{Disks, Networks, System, Pid, Signal};
+use log::{info, warn, error};
 
 // Shared application state
 struct AppState {
@@ -465,38 +466,70 @@ server {{
 
 #[get("/api/nginx/proxies")]
 async fn get_nginx_proxies() -> impl Responder {
+    info!("GET /api/nginx/proxies - Listing nginx configurations");
+    
     let mut proxies = Vec::new();
     
-    if let Ok(entries) = fs::read_dir(NGINX_SITES_AVAILABLE) {
-        for entry in entries.flatten() {
-            if let Ok(content) = fs::read_to_string(entry.path()) {
-                // Parse basic info from config file
-                if let Some(name) = entry.file_name().to_str() {
-                    let domain = content.lines()
-                        .find(|l| l.trim().starts_with("server_name"))
-                        .and_then(|l| l.split_whitespace().nth(1))
-                        .unwrap_or("unknown")
-                        .trim_end_matches(';')
-                        .to_string();
-                    
-                    let backend = content.lines()
-                        .find(|l| l.trim().starts_with("proxy_pass"))
-                        .and_then(|l| l.split_whitespace().nth(1))
-                        .unwrap_or("unknown")
-                        .trim_end_matches(';')
-                        .to_string();
-                    
-                    let ssl = content.contains("listen 443 ssl");
-                    
-                    proxies.push(NginxProxy {
-                        name: name.to_string(),
-                        domain,
-                        backend,
-                        ssl,
-                        extra_config: None,
-                    });
+    // Check if directory exists
+    if !Path::new(NGINX_SITES_AVAILABLE).exists() {
+        warn!("Nginx sites-available directory not found: {}", NGINX_SITES_AVAILABLE);
+        return HttpResponse::Ok().json(serde_json::json!({
+            "proxies": proxies,
+            "warning": format!("Nginx konfiqurasiya qovluğu tapılmadı: {}. Nginx quraşdırılıb?", NGINX_SITES_AVAILABLE)
+        }));
+    }
+    
+    match fs::read_dir(NGINX_SITES_AVAILABLE) {
+        Ok(entries) => {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    if let Ok(content) = fs::read_to_string(&path) {
+                        if let Some(name) = entry.file_name().to_str() {
+                            // Skip default and example configs
+                            if name == "default" || name.contains("example") {
+                                continue;
+                            }
+                            
+                            let domain = content.lines()
+                                .find(|l| l.trim().starts_with("server_name"))
+                                .and_then(|l| l.split_whitespace().nth(1))
+                                .unwrap_or("unknown")
+                                .trim_end_matches(';')
+                                .to_string();
+                            
+                            let backend = content.lines()
+                                .find(|l| l.trim().starts_with("proxy_pass"))
+                                .and_then(|l| l.split_whitespace().nth(1))
+                                .unwrap_or("unknown")
+                                .trim_end_matches(';')
+                                .to_string();
+                            
+                            let ssl = content.contains("listen 443 ssl");
+                            
+                            info!("Found proxy config: {} -> {} ({})", name, domain, backend);
+                            
+                            proxies.push(NginxProxy {
+                                name: name.to_string(),
+                                domain,
+                                backend,
+                                ssl,
+                                extra_config: None,
+                            });
+                        }
+                    } else {
+                        warn!("Could not read file: {:?}", path);
+                    }
                 }
             }
+            info!("Found {} proxy configurations", proxies.len());
+        },
+        Err(e) => {
+            error!("Failed to read nginx directory: {}", e);
+            return HttpResponse::Ok().json(serde_json::json!({
+                "proxies": proxies,
+                "error": format!("Qovluq oxuna bilmədi: {}. İcazə problemi ola bilər.", e)
+            }));
         }
     }
     
@@ -505,17 +538,34 @@ async fn get_nginx_proxies() -> impl Responder {
 
 #[post("/api/nginx/proxies")]
 async fn create_nginx_proxy(proxy: web::Json<NginxProxy>) -> impl Responder {
+    info!("POST /api/nginx/proxies - Creating proxy: {} -> {}", proxy.domain, proxy.backend);
+    
+    // Check if nginx directories exist
+    if !Path::new(NGINX_SITES_AVAILABLE).exists() {
+        error!("Nginx sites-available directory not found");
+        return HttpResponse::InternalServerError().json(NginxResponse {
+            success: false,
+            message: format!("Nginx qovluğu tapılmadı: {}. Nginx quraşdırılıb?", NGINX_SITES_AVAILABLE),
+        });
+    }
+    
     let config_path = format!("{}/{}", NGINX_SITES_AVAILABLE, proxy.name);
     let enabled_path = format!("{}/{}", NGINX_SITES_ENABLED, proxy.name);
+    
+    info!("Config path: {}", config_path);
+    info!("Enabled path: {}", enabled_path);
     
     // Generate nginx config
     let config_content = generate_nginx_config(&proxy);
     
     // Write config file
-    match fs::write(&config_path, config_content) {
+    match fs::write(&config_path, &config_content) {
         Ok(_) => {
+            info!("Config file written successfully");
+            
             // Create symlink to enable
             if Path::new(&enabled_path).exists() {
+                info!("Removing existing symlink");
                 let _ = fs::remove_file(&enabled_path);
             }
             
@@ -523,91 +573,148 @@ async fn create_nginx_proxy(proxy: web::Json<NginxProxy>) -> impl Responder {
             {
                 use std::os::unix::fs::symlink;
                 if let Err(e) = symlink(&config_path, &enabled_path) {
+                    error!("Failed to create symlink: {}", e);
                     return HttpResponse::InternalServerError().json(NginxResponse {
                         success: false,
-                        message: format!("Symlink yaradıla bilmədi: {}", e),
+                        message: format!("Symlink yaradıla bilmədi: {}. Root icazəsi lazımdır.", e),
                     });
                 }
+                info!("Symlink created successfully");
             }
             
             // Test nginx config
+            info!("Testing nginx configuration...");
             let output = std::process::Command::new("nginx")
                 .args(&["-t"])
                 .output();
             
             match output {
-                Ok(result) if result.status.success() => {
-                    // Reload nginx
-                    let reload = std::process::Command::new("systemctl")
-                        .args(&["reload", "nginx"])
-                        .output();
+                Ok(result) => {
+                    let stderr = String::from_utf8_lossy(&result.stderr);
+                    info!("Nginx test output: {}", stderr);
                     
-                    match reload {
-                        Ok(_) => HttpResponse::Ok().json(NginxResponse {
-                            success: true,
-                            message: format!("✅ {} proxy konfiqurasiyası yaradıldı və aktiv edildi", proxy.domain),
-                        }),
-                        Err(e) => HttpResponse::InternalServerError().json(NginxResponse {
+                    if result.status.success() {
+                        // Reload nginx
+                        info!("Reloading nginx...");
+                        let reload = std::process::Command::new("systemctl")
+                            .args(&["reload", "nginx"])
+                            .output();
+                        
+                        match reload {
+                            Ok(reload_result) => {
+                                if reload_result.status.success() {
+                                    info!("Nginx reloaded successfully");
+                                    HttpResponse::Ok().json(NginxResponse {
+                                        success: true,
+                                        message: format!("✅ {} proxy konfiqurasiyası yaradıldı və aktiv edildi", proxy.domain),
+                                    })
+                                } else {
+                                    let reload_err = String::from_utf8_lossy(&reload_result.stderr);
+                                    error!("Nginx reload failed: {}", reload_err);
+                                    HttpResponse::InternalServerError().json(NginxResponse {
+                                        success: false,
+                                        message: format!("Nginx reload edilə bilmədi: {}. Systemctl icazəsi lazımdır.", reload_err),
+                                    })
+                                }
+                            },
+                            Err(e) => {
+                                error!("Failed to execute systemctl: {}", e);
+                                HttpResponse::InternalServerError().json(NginxResponse {
+                                    success: false,
+                                    message: format!("Systemctl çalışdırıla bilmədi: {}. Root icazəsi lazımdır.", e),
+                                })
+                            }
+                        }
+                    } else {
+                        // Rollback on error
+                        error!("Nginx config test failed, rolling back");
+                        let _ = fs::remove_file(&config_path);
+                        let _ = fs::remove_file(&enabled_path);
+                        HttpResponse::BadRequest().json(NginxResponse {
                             success: false,
-                            message: format!("Nginx reload edilə bilmədi: {}", e),
-                        }),
+                            message: format!("Nginx konfiqurasiya xətası: {}", stderr),
+                        })
                     }
                 },
-                _ => {
-                    // Rollback on error
-                    let _ = fs::remove_file(&config_path);
-                    let _ = fs::remove_file(&enabled_path);
-                    HttpResponse::BadRequest().json(NginxResponse {
+                Err(e) => {
+                    error!("Failed to test nginx config: {}", e);
+                    HttpResponse::InternalServerError().json(NginxResponse {
                         success: false,
-                        message: "Nginx konfiqurasiya xətası. Yoxlanıldı və geri alındı.".to_string(),
+                        message: format!("Nginx test edilə bilmədi: {}. Nginx quraşdırılıb?", e),
                     })
                 }
             }
         },
-        Err(e) => HttpResponse::InternalServerError().json(NginxResponse {
-            success: false,
-            message: format!("Fayl yazıla bilmədi: {}. Root icazəsi lazımdır.", e),
-        }),
+        Err(e) => {
+            error!("Failed to write config file: {}", e);
+            HttpResponse::InternalServerError().json(NginxResponse {
+                success: false,
+                message: format!("Fayl yazıla bilmədi: {}. Root icazəsi lazımdır. Container root olaraq çalışmalıdır.", e),
+            })
+        },
     }
 }
 
 #[delete("/api/nginx/proxies/{name}")]
 async fn delete_nginx_proxy(name: web::Path<String>) -> impl Responder {
+    info!("DELETE /api/nginx/proxies/{} - Deleting proxy", name);
+    
     let config_path = format!("{}/{}", NGINX_SITES_AVAILABLE, name.as_str());
     let enabled_path = format!("{}/{}", NGINX_SITES_ENABLED, name.as_str());
     
     // Remove symlink
     if Path::new(&enabled_path).exists() {
         if let Err(e) = fs::remove_file(&enabled_path) {
+            error!("Failed to remove enabled link: {}", e);
             return HttpResponse::InternalServerError().json(NginxResponse {
                 success: false,
-                message: format!("Enabled link silinə bilmədi: {}", e),
+                message: format!("Enabled link silinə bilmədi: {}. Root icazəsi lazımdır.", e),
             });
         }
+        info!("Symlink removed");
     }
     
     // Remove config file
     match fs::remove_file(&config_path) {
         Ok(_) => {
+            info!("Config file removed");
             // Reload nginx
-            let _ = std::process::Command::new("systemctl")
+            let reload = std::process::Command::new("systemctl")
                 .args(&["reload", "nginx"])
                 .output();
             
-            HttpResponse::Ok().json(NginxResponse {
-                success: true,
-                message: format!("✅ {} proxy konfiqurasiyası silindi", name.as_str()),
+            match reload {
+                Ok(_) => {
+                    info!("Nginx reloaded");
+                    HttpResponse::Ok().json(NginxResponse {
+                        success: true,
+                        message: format!("✅ {} proxy konfiqurasiyası silindi", name.as_str()),
+                    })
+                },
+                Err(e) => {
+                    warn!("Failed to reload nginx: {}", e);
+                    HttpResponse::Ok().json(NginxResponse {
+                        success: true,
+                        message: format!("✅ {} silindi (nginx reload edilmədi: {})", name.as_str(), e),
+                    })
+                }
+            }
+        },
+        Err(e) => {
+            error!("Failed to remove config file: {}", e);
+            HttpResponse::InternalServerError().json(NginxResponse {
+                success: false,
+                message: format!("Silinə bilmədi: {}. Root icazəsi lazımdır.", e),
             })
         },
-        Err(e) => HttpResponse::InternalServerError().json(NginxResponse {
-            success: false,
-            message: format!("Silinə bilmədi: {}", e),
-        }),
     }
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    // Initialize logger
+    env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
+    
     // Get address and port from command-line arguments or use defaults
     let args: Vec<String> = std::env::args().collect();
     let address = args.get(1).map(|s| s.as_str()).unwrap_or("10.0.0.1");
@@ -620,6 +727,7 @@ async fn main() -> std::io::Result<()> {
         system: Mutex::new(system),
     });
 
+    info!("🚀 Ubuntu Resource API starting on http://{}", bind_addr);
     println!("🚀 Ubuntu Resource API starting on http://{}", bind_addr);
     println!("📊 Dashboard: http://{}/dashboard", bind_addr);
     println!("🔄 Nginx Manager: http://{}/nginx", bind_addr);
@@ -644,6 +752,7 @@ async fn main() -> std::io::Result<()> {
 
     HttpServer::new(move || {
         App::new()
+            .wrap(middleware::Logger::default())
             .app_data(app_state.clone())
             .service(index)
             .service(dashboard)
