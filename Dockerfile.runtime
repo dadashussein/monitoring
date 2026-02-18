@@ -1,0 +1,13 @@
+FROM debian:bookworm-slim
+
+WORKDIR /app
+
+# Copy the compiled binary
+COPY target/release/ubuntu_resource_api /app/ubuntu_resource_api
+RUN chmod +x /app/ubuntu_resource_api
+
+# Expose port
+EXPOSE 3012
+
+# Run the application (listen on all interfaces inside container)
+CMD ["/app/ubuntu_resource_api", "0.0.0.0", "3012"]
