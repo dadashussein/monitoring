@@ -389,14 +389,20 @@ async fn dashboard() -> HttpResponse {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    // Get address and port from command-line arguments or use defaults
+    let args: Vec<String> = std::env::args().collect();
+    let address = args.get(1).map(|s| s.as_str()).unwrap_or("10.0.0.1");
+    let port = args.get(2).map(|s| s.as_str()).unwrap_or("3012");
+    let bind_addr = format!("{}:{}", address, port);
+
     let system = System::new_all();
 
     let app_state = web::Data::new(AppState {
         system: Mutex::new(system),
     });
 
-    println!("🚀 Ubuntu Resource API starting on http://127.0.0.1:8080");
-    println!("📊 Dashboard: http://127.0.0.1:8080/dashboard");
+    println!("🚀 Ubuntu Resource API starting on http://{}", bind_addr);
+    println!("📊 Dashboard: http://{}/dashboard", bind_addr);
     println!("");
     println!("📡 Available endpoints:");
     println!("   GET    /           - API info");
@@ -428,7 +434,7 @@ async fn main() -> std::io::Result<()> {
             .service(health_check)
             .service(kill_process)
     })
-    .bind("127.0.0.1:8080")?
+    .bind(&bind_addr)?
     .run()
     .await
 }

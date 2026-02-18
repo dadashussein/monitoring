@@ -1,5 +1,9 @@
 .PHONY: build run clean help
 
+# Configuration
+ADDRESS ?= 10.0.0.1
+PORT ?= 3012
+
 # Build binary using Docker (no Rust installation needed)
 build:
 	@echo "🔨 Building binary with Docker..."
@@ -11,8 +15,8 @@ build:
 
 # Run the binary locally
 run: build
-	@echo "🚀 Starting server..."
-	./target/release/ubuntu_resource_api
+	@echo "🚀 Starting server on $(ADDRESS):$(PORT)..."
+	./target/release/ubuntu_resource_api $(ADDRESS) $(PORT)
 
 # Clean build artifacts
 clean:
