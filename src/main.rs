@@ -566,9 +566,30 @@ async fn create_nginx_proxy(proxy: web::Json<NginxProxy>) -> impl Responder {
     
     let config_path = format!("{}/{}", NGINX_SITES_AVAILABLE, proxy.name);
     let enabled_path = format!("{}/{}", NGINX_SITES_ENABLED, proxy.name);
+    let backup_path = format!("{}/{}.backup", NGINX_SITES_AVAILABLE, proxy.name);
     
     info!("Config path: {}", config_path);
     info!("Enabled path: {}", enabled_path);
+    
+    // Backup existing config if it exists
+    let had_backup = if Path::new(&config_path).exists() {
+        info!("Backing up existing config");
+        match fs::copy(&config_path, &backup_path) {
+            Ok(_) => {
+                info!("Backup created successfully");
+                true
+            },
+            Err(e) => {
+                error!("Failed to create backup: {}", e);
+                return HttpResponse::InternalServerError().json(NginxResponse {
+                    success: false,
+                    message: format!("Mövcud konfiqurasiya yedəklənə bilmədi: {}. Dəyişiklik təhlükəlidir.", e),
+                });
+            }
+        }
+    } else {
+        false
+    };
     
     // Generate nginx config
     let config_content = generate_nginx_config(&proxy);
@@ -589,6 +610,11 @@ async fn create_nginx_proxy(proxy: web::Json<NginxProxy>) -> impl Responder {
                 use std::os::unix::fs::symlink;
                 if let Err(e) = symlink(&config_path, &enabled_path) {
                     error!("Failed to create symlink: {}", e);
+                    // Restore backup if we had one
+                    if had_backup {
+                        let _ = fs::copy(&backup_path, &config_path);
+                        let _ = fs::remove_file(&backup_path);
+                    }
                     return HttpResponse::InternalServerError().json(NginxResponse {
                         success: false,
                         message: format!("Symlink yaradıla bilmədi: {}. Root icazəsi lazımdır.", e),
@@ -609,7 +635,12 @@ async fn create_nginx_proxy(proxy: web::Json<NginxProxy>) -> impl Responder {
                     info!("Nginx test output: {}", stderr);
                     
                     if result.status.success() {
-                        // Reload nginx
+                        // Test passed - remove backup and reload nginx
+                        if had_backup {
+                            let _ = fs::remove_file(&backup_path);
+                            info!("Backup removed after successful test");
+                        }
+                        
                         info!("Reloading nginx...");
                         let reload = std::process::Command::new("systemctl")
                             .args(&["reload", "nginx"])
@@ -641,18 +672,46 @@ async fn create_nginx_proxy(proxy: web::Json<NginxProxy>) -> impl Responder {
                             }
                         }
                     } else {
-                        // Rollback on error
+                        // Test failed - restore backup if we had one
                         error!("Nginx config test failed, rolling back");
-                        let _ = fs::remove_file(&config_path);
-                        let _ = fs::remove_file(&enabled_path);
-                        HttpResponse::BadRequest().json(NginxResponse {
-                            success: false,
-                            message: format!("Nginx konfiqurasiya xətası: {}", stderr),
-                        })
+                        
+                        if had_backup {
+                            info!("Restoring backup config");
+                            match fs::copy(&backup_path, &config_path) {
+                                Ok(_) => {
+                                    let _ = fs::remove_file(&backup_path);
+                                    info!("Backup restored successfully");
+                                    HttpResponse::BadRequest().json(NginxResponse {
+                                        success: false,
+                                        message: format!("❌ Nginx konfiqurasiya xətası: {}\n\n✅ Əvvəlki konfiqurasiya bərpa edildi.", stderr),
+                                    })
+                                },
+                                Err(e) => {
+                                    error!("Failed to restore backup: {}", e);
+                                    HttpResponse::InternalServerError().json(NginxResponse {
+                                        success: false,
+                                        message: format!("❌ Nginx xətası: {}\n❌ Yedək bərpa edilə bilmədi: {}", stderr, e),
+                                    })
+                                }
+                            }
+                        } else {
+                            // No backup - just remove the bad config
+                            let _ = fs::remove_file(&config_path);
+                            let _ = fs::remove_file(&enabled_path);
+                            HttpResponse::BadRequest().json(NginxResponse {
+                                success: false,
+                                message: format!("❌ Nginx konfiqurasiya xətası: {}\n\nYanlış konfiqurasiya silindi.", stderr),
+                            })
+                        }
                     }
                 },
                 Err(e) => {
                     error!("Failed to test nginx config: {}", e);
+                    // Restore backup if we had one
+                    if had_backup {
+                        let _ = fs::copy(&backup_path, &config_path);
+                        let _ = fs::remove_file(&backup_path);
+                    }
                     HttpResponse::InternalServerError().json(NginxResponse {
                         success: false,
                         message: format!("Nginx test edilə bilmədi: {}. Nginx quraşdırılıb?", e),
@@ -662,6 +721,11 @@ async fn create_nginx_proxy(proxy: web::Json<NginxProxy>) -> impl Responder {
         },
         Err(e) => {
             error!("Failed to write config file: {}", e);
+            // Restore backup if we had one
+            if had_backup {
+                let _ = fs::copy(&backup_path, &config_path);
+                let _ = fs::remove_file(&backup_path);
+            }
             HttpResponse::InternalServerError().json(NginxResponse {
                 success: false,
                 message: format!("Fayl yazıla bilmədi: {}. Root icazəsi lazımdır. Container root olaraq çalışmalıdır.", e),
