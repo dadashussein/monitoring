@@ -449,9 +449,27 @@ fn generate_nginx_config(proxy: &NginxProxy) -> String {
         "    listen 80;\n    listen [::]:80;".to_string()
     };
 
-    let extra = proxy.extra_config.as_ref()
-        .map(|e| format!("\n    # Əlavə konfiqurasiya\n    {}", e))
-        .unwrap_or_default();
+    // Process extra config - check if it contains location blocks
+    let (extra_in_location, extra_in_server) = if let Some(extra) = &proxy.extra_config {
+        let trimmed = extra.trim();
+        if trimmed.contains("location") {
+            // If it has location blocks, add them at server level
+            (String::new(), format!("\n    # Əlavə konfiqurasiya\n{}", 
+                trimmed.lines()
+                    .map(|line| format!("    {}", line))
+                    .collect::<Vec<_>>()
+                    .join("\n")))
+        } else {
+            // Otherwise add directives inside location /
+            (format!("\n        # Əlavə konfiqurasiya\n{}", 
+                trimmed.lines()
+                    .map(|line| format!("        {}", line))
+                    .collect::<Vec<_>>()
+                    .join("\n")), String::new())
+        }
+    } else {
+        (String::new(), String::new())
+    };
 
     format!(r#"# Nginx Reverse Proxy - {}
 # Yaradılma: {}
@@ -474,9 +492,9 @@ server {{
         proxy_connect_timeout 60s;
         proxy_send_timeout 60s;
         proxy_read_timeout 60s;{}
-    }}
+    }}{}
 }}
-"#, proxy.name, chrono::Local::now().format("%Y-%m-%d %H:%M:%S"), proxy.backend, ssl_config, proxy.domain, proxy.backend, extra)
+"#, proxy.name, chrono::Local::now().format("%Y-%m-%d %H:%M:%S"), proxy.backend, ssl_config, proxy.domain, proxy.backend, extra_in_location, extra_in_server)
 }
 
 #[get("/api/nginx/proxies")]

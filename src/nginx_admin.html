@@ -121,8 +121,11 @@
                     </select>
                 </div>
                 <div class="form-group">
-                    <label>Additional Configuration (optional)</label>
-                    <textarea id="proxy-extra" placeholder="# Additional nginx directives&#10;client_max_body_size 100M;"></textarea>
+                    <label>Əlavə Nginx Konfiqurasiyası (İstəyə bağlı)</label>
+                    <small style="color: var(--text-secondary); display: block; margin-bottom: 8px;">
+                        Buraya əlavə nginx direktiv və location blokları əlavə edə bilərsiniz
+                    </small>
+                    <textarea id="proxy-extra" placeholder="# Nümunələr:&#10;&#10;# Maksimum fayl ölçüsü&#10;client_max_body_size 100M;&#10;&#10;# API docs gizlət&#10;location ~ ^/api/docs {&#10;    return 404;&#10;}&#10;&#10;# WebSocket dəstəyi&#10;proxy_set_header Upgrade $http_upgrade;&#10;proxy_set_header Connection &quot;upgrade&quot;;&#10;&#10;# Timeout artır&#10;proxy_read_timeout 300s;&#10;proxy_connect_timeout 300s;"></textarea>
                 </div>
                 <div class="form-actions">
                     <button type="button" class="btn" onclick="closeModal()">Cancel</button>
