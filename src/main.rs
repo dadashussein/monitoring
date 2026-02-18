@@ -429,8 +429,112 @@ struct NginxResponse {
     message: String,
 }
 
+#[derive(Serialize, Deserialize)]
+struct FormatRequest {
+    config: String,
+}
+
+#[derive(Serialize)]
+struct FormatResponse {
+    success: bool,
+    formatted: Option<String>,
+    error: Option<String>,
+}
+
 const NGINX_SITES_AVAILABLE: &str = "/etc/nginx/sites-available";
 const NGINX_SITES_ENABLED: &str = "/etc/nginx/sites-enabled";
+
+fn format_nginx_config(config: &str) -> String {
+    let mut formatted = String::new();
+    let mut indent_level = 0;
+    let indent = "    "; // 4 spaces
+    
+    for line in config.lines() {
+        let trimmed = line.trim();
+        
+        // Skip empty lines
+        if trimmed.is_empty() {
+            formatted.push('\n');
+            continue;
+        }
+        
+        // Decrease indent for closing braces
+        if trimmed.starts_with('}') {
+            indent_level = indent_level.saturating_sub(1);
+        }
+        
+        // Add indentation
+        for _ in 0..indent_level {
+            formatted.push_str(indent);
+        }
+        
+        // Add the line
+        formatted.push_str(trimmed);
+        formatted.push('\n');
+        
+        // Increase indent for opening braces
+        if trimmed.ends_with('{') {
+            indent_level += 1;
+        }
+    }
+    
+    formatted.trim_end().to_string()
+}
+
+fn validate_nginx_extra_config(config: &str) -> Result<String, String> {
+    // Format the config first
+    let formatted = format_nginx_config(config);
+    
+    // Basic syntax validation
+    let open_braces = formatted.matches('{').count();
+    let close_braces = formatted.matches('}').count();
+    
+    if open_braces != close_braces {
+        return Err(format!("Sintaksis xətası: Açılan və bağlanan mötərizələr uyğun gəlmir (açıq: {}, bağlı: {})", open_braces, close_braces));
+    }
+    
+    // Check for common mistakes
+    for (i, line) in formatted.lines().enumerate() {
+        let trimmed = line.trim();
+        
+        // Skip comments and empty lines
+        if trimmed.starts_with('#') || trimmed.is_empty() {
+            continue;
+        }
+        
+        // Check if directives end with semicolon (except blocks)
+        if !trimmed.ends_with('{') && !trimmed.ends_with('}') && !trimmed.ends_with(';') {
+            // Check if it's a location or server block start
+            if !trimmed.starts_with("location") && !trimmed.starts_with("server") && !trimmed.starts_with("if") {
+                return Err(format!("Sətir {}: Direktiv nöqtəli vergüllə (;) bitməlidir: {}", i + 1, trimmed));
+            }
+        }
+    }
+    
+    Ok(formatted)
+}
+
+#[post("/api/nginx/format")]
+async fn format_nginx_extra_config(req: web::Json<FormatRequest>) -> impl Responder {
+    info!("POST /api/nginx/format - Formatting nginx config");
+    
+    match validate_nginx_extra_config(&req.config) {
+        Ok(formatted) => {
+            HttpResponse::Ok().json(FormatResponse {
+                success: true,
+                formatted: Some(formatted),
+                error: None,
+            })
+        },
+        Err(e) => {
+            HttpResponse::Ok().json(FormatResponse {
+                success: false,
+                formatted: None,
+                error: Some(e),
+            })
+        }
+    }
+}
 
 fn generate_nginx_config(proxy: &NginxProxy) -> String {
     let ssl_config = if proxy.ssl {
@@ -573,6 +677,35 @@ async fn get_nginx_proxies() -> impl Responder {
 async fn create_nginx_proxy(proxy: web::Json<NginxProxy>) -> impl Responder {
     info!("POST /api/nginx/proxies - Creating proxy: {} -> {}", proxy.domain, proxy.backend);
     
+    // Validate and format extra_config if provided
+    let validated_proxy = if let Some(extra) = &proxy.extra_config {
+        if !extra.trim().is_empty() {
+            match validate_nginx_extra_config(extra) {
+                Ok(formatted) => {
+                    info!("Extra config validated and formatted");
+                    NginxProxy {
+                        name: proxy.name.clone(),
+                        domain: proxy.domain.clone(),
+                        backend: proxy.backend.clone(),
+                        ssl: proxy.ssl,
+                        extra_config: Some(formatted),
+                    }
+                },
+                Err(e) => {
+                    error!("Extra config validation failed: {}", e);
+                    return HttpResponse::BadRequest().json(NginxResponse {
+                        success: false,
+                        message: format!("❌ Əlavə konfiqurasiya xətası: {}", e),
+                    });
+                }
+            }
+        } else {
+            proxy.into_inner()
+        }
+    } else {
+        proxy.into_inner()
+    };
+    
     // Check if nginx directories exist
     if !Path::new(NGINX_SITES_AVAILABLE).exists() {
         error!("Nginx sites-available directory not found");
@@ -582,9 +715,9 @@ async fn create_nginx_proxy(proxy: web::Json<NginxProxy>) -> impl Responder {
         });
     }
     
-    let config_path = format!("{}/{}", NGINX_SITES_AVAILABLE, proxy.name);
-    let enabled_path = format!("{}/{}", NGINX_SITES_ENABLED, proxy.name);
-    let backup_path = format!("{}/{}.backup", NGINX_SITES_AVAILABLE, proxy.name);
+    let config_path = format!("{}/{}", NGINX_SITES_AVAILABLE, validated_proxy.name);
+    let enabled_path = format!("{}/{}", NGINX_SITES_ENABLED, validated_proxy.name);
+    let backup_path = format!("{}/{}.backup", NGINX_SITES_AVAILABLE, validated_proxy.name);
     
     info!("Config path: {}", config_path);
     info!("Enabled path: {}", enabled_path);
@@ -610,7 +743,7 @@ async fn create_nginx_proxy(proxy: web::Json<NginxProxy>) -> impl Responder {
     };
     
     // Generate nginx config
-    let config_content = generate_nginx_config(&proxy);
+    let config_content = generate_nginx_config(&validated_proxy);
     
     // Write config file
     match fs::write(&config_path, &config_content) {
@@ -1375,6 +1508,7 @@ async fn main() -> std::io::Result<()> {
     println!("   DELETE /api/processes/:pid - Kill process by PID");
     println!("   GET    /api/nginx/proxies - List nginx proxies");
     println!("   POST   /api/nginx/proxies - Create nginx proxy");
+    println!("   POST   /api/nginx/format - Format and validate nginx config");
     println!("   DELETE /api/nginx/proxies/:name - Delete nginx proxy");
     println!("   GET    /api/docker/containers - List containers");
     println!("   POST   /api/docker/containers/:id/start - Start container");
@@ -1410,6 +1544,7 @@ async fn main() -> std::io::Result<()> {
             .service(get_nginx_proxies)
             .service(create_nginx_proxy)
             .service(delete_nginx_proxy)
+            .service(format_nginx_extra_config)
             .service(list_containers)
             .service(start_container)
             .service(stop_container)
