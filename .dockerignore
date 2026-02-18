@@ -1,9 +1,13 @@
+# Exclude target directory for build Dockerfile
 target/
+# But allow it for runtime Dockerfile (will be overridden when needed)
+!target/release/ubuntu_resource_api
+
 .git/
 .github/
 *.md
 .gitignore
 .dockerignore
-Dockerfile*
+Dockerfile
 docker-compose.yml
 Makefile
