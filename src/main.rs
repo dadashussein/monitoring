@@ -808,10 +808,9 @@ async fn list_containers() -> impl Responder {
                 let ports = c.ports.as_ref()
                     .map(|p| p.iter()
                         .filter_map(|port| {
-                            if let (Some(pub_port), Some(priv_port)) = (port.public_port, port.private_port) {
-                                Some(format!("{}:{}", pub_port, priv_port))
-                            } else {
-                                None
+                            match (port.public_port, port.private_port) {
+                                (Some(pub_port), priv_port) => Some(format!("{}:{}", pub_port, priv_port)),
+                                _ => None
                             }
                         })
                         .collect::<Vec<_>>()
@@ -984,26 +983,22 @@ async fn get_container_logs(id: web::Path<String>) -> impl Responder {
         ..Default::default()
     });
     
-    match docker.logs(&id, options) {
-        logs_stream => {
-            let mut logs = String::new();
-            let mut stream = logs_stream;
-            
-            while let Some(log) = stream.next().await {
-                match log {
-                    Ok(output) => {
-                        logs.push_str(&output.to_string());
-                    },
-                    Err(e) => {
-                        error!("Error reading logs: {}", e);
-                        break;
-                    }
-                }
+    let mut logs = String::new();
+    let mut stream = docker.logs(&id, options);
+    
+    while let Some(log) = stream.next().await {
+        match log {
+            Ok(output) => {
+                logs.push_str(&output.to_string());
+            },
+            Err(e) => {
+                error!("Error reading logs: {}", e);
+                break;
             }
-            
-            HttpResponse::Ok().json(DockerLogsResponse { logs })
         }
     }
+    
+    HttpResponse::Ok().json(DockerLogsResponse { logs })
 }
 
 #[get("/api/docker/images")]
@@ -1026,9 +1021,11 @@ async fn list_images() -> impl Responder {
     match docker.list_images(options).await {
         Ok(images) => {
             let result: Vec<DockerImage> = images.iter().map(|img| {
-                let repo_tags = img.repo_tags.as_ref()
-                    .and_then(|tags| tags.first())
-                    .unwrap_or(&"<none>:<none>".to_string())
+                let default_tag = "<none>:<none>".to_string();
+                let repo_tags = img.repo_tags
+                    .as_ref()
+                    .and_then(|tags: &Vec<String>| tags.first())
+                    .unwrap_or(&default_tag)
                     .clone();
                 
                 let parts: Vec<&str> = repo_tags.split(':').collect();
@@ -1173,9 +1170,7 @@ async fn list_networks() -> impl Responder {
                 let subnet = net.ipam.as_ref()
                     .and_then(|ipam| ipam.config.as_ref())
                     .and_then(|configs| configs.first())
-                    .and_then(|config| config.get("Subnet"))
-                    .and_then(|s| s.as_str())
-                    .map(|s| s.to_string());
+                    .and_then(|config| config.subnet.clone());
                 
                 DockerNetwork {
                     id: net.id.as_ref().unwrap_or(&String::new()).clone(),
