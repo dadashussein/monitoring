@@ -1,17 +1,63 @@
 # Configuration
-IMAGE_NAME := dadashussein/resource-manager
-TAG := latest
-PLATFORM := linux/amd64
+BINARY_NAME := ubuntu_resource_api
 
-# ... (Mevcut clean, help vs. komutların kalabilir) ...
+.PHONY: help install uninstall build run clean release test
 
-# Tek komutla hem build et hem de Docker Hub'a gönder
-publish:
-	@echo "🔐 Docker Hub'a giriş yapılıyor..."
-	docker login
-	@echo "🐳 Docker imajı build ediliyor..."
-	docker build --platform $(PLATFORM) -t $(IMAGE_NAME):$(TAG) .
-	@echo "🚀 Docker Hub'a pushlanıyor..."
-	docker push $(IMAGE_NAME):$(TAG)
-	@echo "✅ İşlem tamam! Müşterilerin artık şu komutu kullanabilir:"
-	@echo "docker pull $(IMAGE_NAME):$(TAG)"
+# Default target
+help:
+	@echo "Ubuntu Resource Monitor - Available Commands:"
+	@echo ""
+	@echo "Installation:"
+	@echo "  make install          - Install as systemd service (requires sudo)"
+	@echo "  make uninstall        - Remove systemd service (requires sudo)"
+	@echo ""
+	@echo "Development:"
+	@echo "  make build            - Build release binary"
+	@echo "  make run              - Run the application"
+	@echo "  make test             - Run tests"
+	@echo "  make clean            - Clean build artifacts"
+	@echo ""
+	@echo "Release:"
+	@echo "  make release          - Create GitHub release with binaries"
+	@echo ""
+
+# Install as systemd service
+install:
+	@echo "🚀 Installing Ubuntu Resource Monitor..."
+	@chmod +x install.sh
+	@sudo ./install.sh
+
+# Uninstall systemd service
+uninstall:
+	@echo "🗑️  Uninstalling Ubuntu Resource Monitor..."
+	@chmod +x uninstall.sh
+	@sudo ./uninstall.sh
+
+# Build release binary
+build:
+	@echo "🔨 Building release binary..."
+	cargo build --release
+
+# Run the application
+run: build
+	@echo "🚀 Starting Ubuntu Resource Monitor..."
+	./target/release/$(BINARY_NAME)
+
+# Run tests
+test:
+	@echo "🧪 Running tests..."
+	cargo test
+
+# Clean build artifacts
+clean:
+	@echo "🧹 Cleaning build artifacts..."
+	cargo clean
+
+# Create GitHub release
+release:
+	@echo "🏷️  Creating GitHub release..."
+	@echo "Make sure you have created a tag first:"
+	@echo "  git tag v1.0.0"
+	@echo "  git push origin v1.0.0"
+	@echo ""
+	@echo "Then GitHub Actions will automatically build and release binaries."

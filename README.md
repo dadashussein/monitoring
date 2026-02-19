@@ -1,7 +1,7 @@
 # Ubuntu Resource Monitor
 
 [![Rust](https://img.shields.io/badge/rust-1.83%2B-orange?logo=rust)](https://rust-lang.org)
-[![Docker](https://img.shields.io/badge/docker-ready-blue?logo=docker)](https://docker.com)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Local desktop system monitoring tool with real-time dashboard. Monitor CPU, memory, disk, network and processes on your Linux machine. Kill processes directly from the dashboard.
 
@@ -17,72 +17,102 @@ Local desktop system monitoring tool with real-time dashboard. Monitor CPU, memo
 - 📊 Sort processes by CPU or Memory usage
 - ⚡ System load average
 - 🎨 Beautiful dark-themed dashboard with real-time updates
+- 🔄 **Nginx Proxy Manager** - Create and manage reverse proxies
+- 🐳 **Docker Manager** - Manage containers, images, volumes, and networks
 
-## 🚀 Quick Start with Docker (Recommended)
+## 📦 Installation Methods
 
-### Development Mode (Hot Reload)
+| Method | Rust Required | Build Time | Best For |
+|--------|---------------|------------|----------|
+| **Pre-built Binary** | ❌ No | ⚡ Instant | Production servers |
+| **Build from Source** | ✅ Yes | 🔨 ~5 min | Development |
+
+## 🚀 Quick Start
+
+> 📖 **Detailed installation guide**: See [INSTALL.md](INSTALL.md) for complete installation instructions.
+
+### Recommended: One-Command Install (No Rust Required!) ⭐
+
+Download and install pre-built binary:
 
 ```bash
-# Start development server with hot reload
-make dev
+curl -sSL https://raw.githubusercontent.com/YOUR_USERNAME/ubuntu-resource-monitor/main/install-binary.sh | sudo bash
+```
+
+Or download and run manually:
+
+```bash
+wget https://raw.githubusercontent.com/YOUR_USERNAME/ubuntu-resource-monitor/main/install-binary.sh
+chmod +x install-binary.sh
+sudo ./install-binary.sh
+```
+
+**What this does:**
+- ✅ Downloads pre-built binary (no compilation needed!)
+- ✅ Asks for your preferred port and address
+- ✅ Installs to `/opt/ubuntu-resource-monitor`
+- ✅ Creates systemd service
+- ✅ Starts automatically
+
+**No Rust, no Cargo, no Docker - just works!** 🎉
+
+**Service Management:**
+```bash
+# Check status
+sudo systemctl status ubuntu-resource-monitor
 
 # View logs
-make dev-logs
+sudo journalctl -u ubuntu-resource-monitor -f
 
-# Stop server
-make dev-stop
+# Restart service
+sudo systemctl restart ubuntu-resource-monitor
+
+# Stop service
+sudo systemctl stop ubuntu-resource-monitor
+
+# Uninstall
+sudo bash uninstall.sh
 ```
 
-The server will start at `http://localhost:8080` and automatically reload when you change the code.
+### Alternative: Build from Source
 
-### Production Mode
+If you want to build from source:
+
+### Option 2: Install from Source (If you want to build yourself)
+
+### Alternative: Build from Source
+
+If you want to build from source:
 
 ```bash
-# Build and start production server
-make prod
+# Clone repository
+git clone <repository-url>
+cd ubuntu-resource-monitor
 
-# View logs
-make prod-logs
-
-# Stop server
-make prod-stop
+# Run installer (will build from source)
+sudo bash install.sh
 ```
 
-### All Docker Commands
+The installer will:
+- ✅ Install Rust/Cargo if needed
+- ✅ Build the application
+- ✅ Install and configure systemd service
 
-```bash
-make help              # Show all available commands
-make dev               # Start development server
-make dev-build         # Build development image
-make dev-logs          # Show development logs
-make dev-stop          # Stop development server
-make prod              # Start production server
-make prod-build        # Build production image
-make prod-logs         # Show production logs
-make prod-stop         # Stop production server
-make docker-clean      # Clean Docker resources
-```
+## 🔧 Manual Build and Run
 
-## 🔧 Alternative: Build Locally
+## 🔧 Manual Build and Run
 
-### With Docker (No Rust Installation Required)
-
-```bash
-# Build binary using Docker
-make build
-
-# Run the application
-make run
-```
-
-### With Rust
+For development or testing:
 
 ```bash
 # Build
 cargo build --release
 
-# Run
-cargo run --release
+# Run with custom port and address
+SERVER_BIND_ADDRESS="0.0.0.0:9000" cargo run --release
+
+# Or run the binary directly
+./target/release/ubuntu_resource_api
 ```
 
 ## 📡 API Endpoints
@@ -183,9 +213,9 @@ curl -X DELETE http://localhost:8080/api/processes/1234
 - **Rust 1.83** - Systems programming language
 - **Actix-web** - Fast web framework
 - **Sysinfo** - System information gathering
-- **Docker & Docker Compose** - Containerization
 - **Serde** - Serialization
 - **Chrono** - Date/time handling
+- **Bollard** - Docker API client
 
 ## 🏗️ Architecture
 
