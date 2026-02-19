@@ -22,6 +22,47 @@ BINARY_NAME="ubuntu_resource_api"
 DEFAULT_PORT="8080"
 DEFAULT_ADDRESS="0.0.0.0"
 
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --port)
+            PORT="$2"
+            shift 2
+            ;;
+        --address)
+            BIND_ADDRESS="$2"
+            shift 2
+            ;;
+        --nginx-available)
+            NGINX_AVAILABLE="$2"
+            shift 2
+            ;;
+        --nginx-enabled)
+            NGINX_ENABLED="$2"
+            shift 2
+            ;;
+        --docker-socket)
+            DOCKER_SOCKET="$2"
+            shift 2
+            ;;
+        --non-interactive)
+            NON_INTERACTIVE=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
+# Set defaults if not provided
+PORT=${PORT:-$DEFAULT_PORT}
+BIND_ADDRESS=${BIND_ADDRESS:-$DEFAULT_ADDRESS}
+NGINX_AVAILABLE=${NGINX_AVAILABLE:-/etc/nginx/sites-available}
+NGINX_ENABLED=${NGINX_ENABLED:-/etc/nginx/sites-enabled}
+DOCKER_SOCKET=${DOCKER_SOCKET:-unix:///var/run/docker.sock}
+
 # Print colored message
 print_message() {
     local color=$1
@@ -102,27 +143,38 @@ download_binary() {
 
 # Get user input for configuration
 get_configuration() {
+    # Skip if non-interactive mode
+    if [ "$NON_INTERACTIVE" = true ]; then
+        print_message "$GREEN" "📝 Konfiqurasiya (non-interactive):"
+        echo "   Server: $BIND_ADDRESS:$PORT"
+        echo "   Nginx Available: $NGINX_AVAILABLE"
+        echo "   Nginx Enabled: $NGINX_ENABLED"
+        echo "   Docker Socket: $DOCKER_SOCKET"
+        echo ""
+        return
+    fi
+    
     print_message "$BLUE" "⚙️  Konfiqurasiya"
     echo ""
     
     # Get bind address
-    read -p "Server adresi (default: $DEFAULT_ADDRESS): " BIND_ADDRESS
-    BIND_ADDRESS=${BIND_ADDRESS:-$DEFAULT_ADDRESS}
+    read -p "Server adresi (default: $BIND_ADDRESS): " INPUT_ADDRESS
+    BIND_ADDRESS=${INPUT_ADDRESS:-$BIND_ADDRESS}
     
     # Get port
-    read -p "Server portu (default: $DEFAULT_PORT): " PORT
-    PORT=${PORT:-$DEFAULT_PORT}
+    read -p "Server portu (default: $PORT): " INPUT_PORT
+    PORT=${INPUT_PORT:-$PORT}
     
     # Nginx paths
-    read -p "Nginx sites-available yolu (default: /etc/nginx/sites-available): " NGINX_AVAILABLE
-    NGINX_AVAILABLE=${NGINX_AVAILABLE:-/etc/nginx/sites-available}
+    read -p "Nginx sites-available yolu (default: $NGINX_AVAILABLE): " INPUT_NGINX_AVAILABLE
+    NGINX_AVAILABLE=${INPUT_NGINX_AVAILABLE:-$NGINX_AVAILABLE}
     
-    read -p "Nginx sites-enabled yolu (default: /etc/nginx/sites-enabled): " NGINX_ENABLED
-    NGINX_ENABLED=${NGINX_ENABLED:-/etc/nginx/sites-enabled}
+    read -p "Nginx sites-enabled yolu (default: $NGINX_ENABLED): " INPUT_NGINX_ENABLED
+    NGINX_ENABLED=${INPUT_NGINX_ENABLED:-$NGINX_ENABLED}
     
     # Docker socket
-    read -p "Docker socket yolu (default: unix:///var/run/docker.sock): " DOCKER_SOCKET
-    DOCKER_SOCKET=${DOCKER_SOCKET:-unix:///var/run/docker.sock}
+    read -p "Docker socket yolu (default: $DOCKER_SOCKET): " INPUT_DOCKER_SOCKET
+    DOCKER_SOCKET=${INPUT_DOCKER_SOCKET:-$DOCKER_SOCKET}
     
     echo ""
     print_message "$GREEN" "📝 Konfiqurasiya:"
