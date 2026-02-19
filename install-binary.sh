@@ -143,8 +143,8 @@ download_binary() {
 
 # Get user input for configuration
 get_configuration() {
-    # Skip if non-interactive mode
-    if [ "$NON_INTERACTIVE" = true ]; then
+    # Skip if non-interactive mode or stdin is not a terminal
+    if [ "$NON_INTERACTIVE" = true ] || [ ! -t 0 ]; then
         print_message "$GREEN" "📝 Konfiqurasiya (non-interactive):"
         echo "   Server: $BIND_ADDRESS:$PORT"
         echo "   Nginx Available: $NGINX_AVAILABLE"
