@@ -441,12 +441,24 @@ struct FormatResponse {
     error: Option<String>,
 }
 
+#[derive(Serialize, Deserialize)]
+struct FormatRequest {
+    config: String,
+}
+
+#[derive(Serialize)]
+struct FormatResponse {
+    success: bool,
+    formatted: Option<String>,
+    error: Option<String>,
+}
+
 const NGINX_SITES_AVAILABLE: &str = "/etc/nginx/sites-available";
 const NGINX_SITES_ENABLED: &str = "/etc/nginx/sites-enabled";
 
 fn format_nginx_config(config: &str) -> String {
     let mut formatted = String::new();
-    let mut indent_level = 0;
+    let mut indent_level: i32 = 0;
     let indent = "    "; // 4 spaces
     
     for line in config.lines() {
@@ -675,7 +687,8 @@ async fn get_nginx_proxies() -> impl Responder {
 
 #[post("/api/nginx/proxies")]
 async fn create_nginx_proxy(proxy: web::Json<NginxProxy>) -> impl Responder {
-    info!("POST /api/nginx/proxies - Creating proxy: {} -> {}", proxy.domain, proxy.backend);
+    let proxy_domain = proxy.domain.clone();
+    info!("POST /api/nginx/proxies - Creating proxy: {} -> {}", proxy_domain, proxy.backend);
     
     // Validate and format extra_config if provided
     let validated_proxy = if let Some(extra) = &proxy.extra_config {
@@ -718,6 +731,9 @@ async fn create_nginx_proxy(proxy: web::Json<NginxProxy>) -> impl Responder {
     let config_path = format!("{}/{}", NGINX_SITES_AVAILABLE, validated_proxy.name);
     let enabled_path = format!("{}/{}", NGINX_SITES_ENABLED, validated_proxy.name);
     let backup_path = format!("{}/{}.backup", NGINX_SITES_AVAILABLE, validated_proxy.name);
+    let config_path = format!("{}/{}", NGINX_SITES_AVAILABLE, validated_proxy.name);
+    let enabled_path = format!("{}/{}", NGINX_SITES_ENABLED, validated_proxy.name);
+    let backup_path = format!("{}/{}.backup", NGINX_SITES_AVAILABLE, validated_proxy.name);
     
     info!("Config path: {}", config_path);
     info!("Enabled path: {}", enabled_path);
@@ -743,6 +759,7 @@ async fn create_nginx_proxy(proxy: web::Json<NginxProxy>) -> impl Responder {
     };
     
     // Generate nginx config
+    let config_content = generate_nginx_config(&validated_proxy);
     let config_content = generate_nginx_config(&validated_proxy);
     
     // Write config file
@@ -803,7 +820,7 @@ async fn create_nginx_proxy(proxy: web::Json<NginxProxy>) -> impl Responder {
                                     info!("Nginx reloaded successfully");
                                     HttpResponse::Ok().json(NginxResponse {
                                         success: true,
-                                        message: format!("✅ {} proxy konfiqurasiyası yaradıldı və aktiv edildi", proxy.domain),
+                                        message: format!("✅ {} proxy konfiqurasiyası yaradıldı və aktiv edildi", validated_proxy.domain),
                                     })
                                 } else {
                                     let reload_err = String::from_utf8_lossy(&reload_result.stderr);
@@ -1509,6 +1526,7 @@ async fn main() -> std::io::Result<()> {
     println!("   GET    /api/nginx/proxies - List nginx proxies");
     println!("   POST   /api/nginx/proxies - Create nginx proxy");
     println!("   POST   /api/nginx/format - Format and validate nginx config");
+    println!("   POST   /api/nginx/format - Format and validate nginx config");
     println!("   DELETE /api/nginx/proxies/:name - Delete nginx proxy");
     println!("   GET    /api/docker/containers - List containers");
     println!("   POST   /api/docker/containers/:id/start - Start container");
@@ -1544,6 +1562,7 @@ async fn main() -> std::io::Result<()> {
             .service(get_nginx_proxies)
             .service(create_nginx_proxy)
             .service(delete_nginx_proxy)
+            .service(format_nginx_extra_config)
             .service(format_nginx_extra_config)
             .service(list_containers)
             .service(start_container)

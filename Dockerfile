@@ -1,25 +1,45 @@
-# Build binary using Docker
-FROM rust:1.88-slim
+# --- Stage 1: Builder (Rust Derleme Aşaması) ---
+FROM rust:bookworm as builder
+
+WORKDIR /app
+COPY . .
+
+# Release modunda derle
+RUN cargo build --release
+
+# --- Stage 2: Runtime (Çalışma Aşaması) ---
+FROM debian:bookworm-slim
+
+# Gerekli araçları kur (util-linux, nsenter içerir)
+RUN apt-get update && \
+    apt-get install -y nginx util-linux && \
+    rm -rf /var/lib/apt/lists/* && \
+    mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
 
 WORKDIR /app
 
-# Configure cargo for better network handling
-ENV CARGO_NET_RETRY=10
-ENV CARGO_HTTP_TIMEOUT=300
+# --- MAGIC FIX: Systemctl Wrapper ---
+# Rust uygulaman "systemctl" çağırdığında, aslında host makinede çalışması için
+# bir sarmalayıcı (wrapper) script yazıyoruz.
+RUN echo '#!/bin/bash\nnsenter --target 1 --mount --uts --ipc --net --pid systemctl "$@"' > /usr/local/bin/systemctl && \
+    chmod +x /usr/local/bin/systemctl
 
-# Set up cargo config with sparse registry (faster and more reliable)
-RUN mkdir -p /usr/local/cargo && \
-    echo '[registries.crates-io]' > /usr/local/cargo/config.toml && \
-    echo 'protocol = "sparse"' >> /usr/local/cargo/config.toml
+# Derlenen binary'yi kopyala
+COPY --from=builder /app/target/release/ubuntu_resource_api /app/ubuntu_resource_api
+RUN chmod +x /app/ubuntu_resource_api
 
-# Copy project files
-COPY Cargo.toml ./
-COPY src ./src
+# Portu dışarı aç
+EXPOSE 3012
 
-# Build release binary (will generate new Cargo.lock)
-RUN cargo build --release
+# Log seviyesi
+ENV RUST_LOG=info
 
-# Copy binary to a known location for easy extraction
-RUN cp /app/target/release/ubuntu_resource_api /ubuntu_resource_api
+# Root olarak çalıştır
+USER root
 
-CMD ["cp", "/ubuntu_resource_api", "/output/ubuntu_resource_api"]
+ENV APP_HOST=0.0.0.0
+ENV APP_PORT=3012
+
+# Wrapper ve Binary'yi değişkenlerle başlat
+# DİKKAT: Burada sh -c kullanıyoruz ki $APP_HOST ve $APP_PORT okunabilsin.
+CMD ["sh", "-c", "/app/ubuntu_resource_api ${APP_HOST} ${APP_PORT}"]
