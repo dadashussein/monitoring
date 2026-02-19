@@ -13,7 +13,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-GITHUB_REPO="YOUR_USERNAME/ubuntu-resource-monitor"  # Update this!
+GITHUB_REPO="dadashussein/monitoring"
 INSTALL_DIR="/opt/ubuntu-resource-monitor"
 SERVICE_NAME="ubuntu-resource-monitor"
 BINARY_NAME="ubuntu_resource_api"
