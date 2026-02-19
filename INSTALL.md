@@ -7,13 +7,13 @@
 **One-command install:**
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/YOUR_USERNAME/ubuntu-resource-monitor/main/install-binary.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/dadashussein/ubuntu-resource-monitor/main/install-binary.sh | sudo bash
 ```
 
 Or download and run:
 
 ```bash
-wget https://raw.githubusercontent.com/YOUR_USERNAME/ubuntu-resource-monitor/main/install-binary.sh
+wget https://raw.githubusercontent.com/dadashussein/ubuntu-resource-monitor/main/install-binary.sh
 chmod +x install-binary.sh
 sudo ./install-binary.sh
 ```
