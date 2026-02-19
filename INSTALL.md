@@ -30,13 +30,13 @@ sudo ./install-binary.sh
 **One-Command Install:**
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/YOUR_USERNAME/ubuntu-resource-monitor/main/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/dadashussein/ubuntu-resource-monitor/main/install.sh | sudo bash
 ```
 
 Or download and run:
 
 ```bash
-wget https://raw.githubusercontent.com/YOUR_USERNAME/ubuntu-resource-monitor/main/install.sh
+wget https://raw.githubusercontent.com/dadashussein/ubuntu-resource-monitor/main/install.sh
 chmod +x install.sh
 sudo ./install.sh
 ```
