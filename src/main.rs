@@ -1,4 +1,4 @@
-use actix_web::{delete, get, post, web, App, HttpResponse, HttpServer, Responder, middleware};
+use actix_web::{delete, get, post, put, web, App, HttpResponse, HttpServer, Responder, middleware};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use std::fs;
@@ -441,18 +441,6 @@ struct FormatResponse {
     error: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
-struct FormatRequest {
-    config: String,
-}
-
-#[derive(Serialize)]
-struct FormatResponse {
-    success: bool,
-    formatted: Option<String>,
-    error: Option<String>,
-}
-
 const NGINX_SITES_AVAILABLE: &str = "/etc/nginx/sites-available";
 const NGINX_SITES_ENABLED: &str = "/etc/nginx/sites-enabled";
 
@@ -731,9 +719,6 @@ async fn create_nginx_proxy(proxy: web::Json<NginxProxy>) -> impl Responder {
     let config_path = format!("{}/{}", NGINX_SITES_AVAILABLE, validated_proxy.name);
     let enabled_path = format!("{}/{}", NGINX_SITES_ENABLED, validated_proxy.name);
     let backup_path = format!("{}/{}.backup", NGINX_SITES_AVAILABLE, validated_proxy.name);
-    let config_path = format!("{}/{}", NGINX_SITES_AVAILABLE, validated_proxy.name);
-    let enabled_path = format!("{}/{}", NGINX_SITES_ENABLED, validated_proxy.name);
-    let backup_path = format!("{}/{}.backup", NGINX_SITES_AVAILABLE, validated_proxy.name);
     
     info!("Config path: {}", config_path);
     info!("Enabled path: {}", enabled_path);
@@ -759,7 +744,6 @@ async fn create_nginx_proxy(proxy: web::Json<NginxProxy>) -> impl Responder {
     };
     
     // Generate nginx config
-    let config_content = generate_nginx_config(&validated_proxy);
     let config_content = generate_nginx_config(&validated_proxy);
     
     // Write config file
@@ -952,6 +936,187 @@ async fn delete_nginx_proxy(name: web::Path<String>) -> impl Responder {
             HttpResponse::InternalServerError().json(NginxResponse {
                 success: false,
                 message: format!("Silinə bilmədi: {}. Root icazəsi lazımdır.", e),
+            })
+        },
+    }
+}
+#[put("/api/nginx/proxies/{name}")]
+async fn update_nginx_proxy(name: web::Path<String>, proxy: web::Json<NginxProxy>) -> impl Responder {
+    let proxy_name = name.into_inner();
+    info!("PUT /api/nginx/proxies/{} - Updating proxy", proxy_name);
+
+    // Validate that the name matches
+    if proxy.name != proxy_name {
+        return HttpResponse::BadRequest().json(NginxResponse {
+            success: false,
+            message: "URL-dəki ad və body-dəki ad uyğun gəlmir".to_string(),
+        });
+    }
+
+    // Validate and format extra_config if provided
+    let validated_proxy = if let Some(extra) = &proxy.extra_config {
+        if !extra.trim().is_empty() {
+            match validate_nginx_extra_config(extra) {
+                Ok(formatted) => {
+                    info!("Extra config validated and formatted");
+                    NginxProxy {
+                        name: proxy.name.clone(),
+                        domain: proxy.domain.clone(),
+                        backend: proxy.backend.clone(),
+                        ssl: proxy.ssl,
+                        extra_config: Some(formatted),
+                    }
+                },
+                Err(e) => {
+                    error!("Extra config validation failed: {}", e);
+                    return HttpResponse::BadRequest().json(NginxResponse {
+                        success: false,
+                        message: format!("❌ Əlavə konfiqurasiya xətası: {}", e),
+                    });
+                }
+            }
+        } else {
+            proxy.into_inner()
+        }
+    } else {
+        proxy.into_inner()
+    };
+
+    let config_path = format!("{}/{}", NGINX_SITES_AVAILABLE, validated_proxy.name);
+    let enabled_path = format!("{}/{}", NGINX_SITES_ENABLED, validated_proxy.name);
+    let backup_path = format!("{}/{}.backup", NGINX_SITES_AVAILABLE, validated_proxy.name);
+
+    // Check if config exists
+    if !Path::new(&config_path).exists() {
+        error!("Config file not found: {}", config_path);
+        return HttpResponse::NotFound().json(NginxResponse {
+            success: false,
+            message: format!("❌ {} konfiqurasiyası tapılmadı", validated_proxy.name),
+        });
+    }
+
+    // Backup existing config
+    info!("Backing up existing config");
+    if let Err(e) = fs::copy(&config_path, &backup_path) {
+        error!("Failed to create backup: {}", e);
+        return HttpResponse::InternalServerError().json(NginxResponse {
+            success: false,
+            message: format!("Yedək yaradıla bilmədi: {}", e),
+        });
+    }
+
+    // Generate new config
+    let config_content = generate_nginx_config(&validated_proxy);
+
+    // Write new config
+    match fs::write(&config_path, &config_content) {
+        Ok(_) => {
+            info!("Config file updated successfully");
+
+            // Ensure symlink exists
+            if !Path::new(&enabled_path).exists() {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::symlink;
+                    if let Err(e) = symlink(&config_path, &enabled_path) {
+                        error!("Failed to create symlink: {}", e);
+                        let _ = fs::copy(&backup_path, &config_path);
+                        let _ = fs::remove_file(&backup_path);
+                        return HttpResponse::InternalServerError().json(NginxResponse {
+                            success: false,
+                            message: format!("Symlink yaradıla bilmədi: {}", e),
+                        });
+                    }
+                }
+            }
+
+            // Test nginx config
+            info!("Testing nginx configuration...");
+            let output = std::process::Command::new("nginx")
+                .args(&["-t"])
+                .output();
+
+            match output {
+                Ok(result) => {
+                    let stderr = String::from_utf8_lossy(&result.stderr);
+                    info!("Nginx test output: {}", stderr);
+
+                    if result.status.success() {
+                        // Test passed - remove backup and reload nginx
+                        let _ = fs::remove_file(&backup_path);
+                        info!("Backup removed after successful test");
+
+                        info!("Reloading nginx...");
+                        let reload = std::process::Command::new("systemctl")
+                            .args(&["reload", "nginx"])
+                            .output();
+
+                        match reload {
+                            Ok(reload_result) => {
+                                if reload_result.status.success() {
+                                    info!("Nginx reloaded successfully");
+                                    HttpResponse::Ok().json(NginxResponse {
+                                        success: true,
+                                        message: format!("✅ {} proxy konfiqurasiyası yeniləndi", validated_proxy.domain),
+                                    })
+                                } else {
+                                    let reload_err = String::from_utf8_lossy(&reload_result.stderr);
+                                    error!("Nginx reload failed: {}", reload_err);
+                                    HttpResponse::InternalServerError().json(NginxResponse {
+                                        success: false,
+                                        message: format!("Nginx reload edilə bilmədi: {}", reload_err),
+                                    })
+                                }
+                            },
+                            Err(e) => {
+                                error!("Failed to execute systemctl: {}", e);
+                                HttpResponse::InternalServerError().json(NginxResponse {
+                                    success: false,
+                                    message: format!("Systemctl çalışdırıla bilmədi: {}", e),
+                                })
+                            }
+                        }
+                    } else {
+                        // Test failed - restore backup
+                        error!("Nginx config test failed, rolling back");
+                        info!("Restoring backup config");
+                        match fs::copy(&backup_path, &config_path) {
+                            Ok(_) => {
+                                let _ = fs::remove_file(&backup_path);
+                                info!("Backup restored successfully");
+                                HttpResponse::BadRequest().json(NginxResponse {
+                                    success: false,
+                                    message: format!("❌ Nginx konfiqurasiya xətası: {}\n\n✅ Əvvəlki konfiqurasiya bərpa edildi.", stderr),
+                                })
+                            },
+                            Err(e) => {
+                                error!("Failed to restore backup: {}", e);
+                                HttpResponse::InternalServerError().json(NginxResponse {
+                                    success: false,
+                                    message: format!("❌ Nginx xətası: {}\n❌ Yedək bərpa edilə bilmədi: {}", stderr, e),
+                                })
+                            }
+                        }
+                    }
+                },
+                Err(e) => {
+                    error!("Failed to test nginx config: {}", e);
+                    let _ = fs::copy(&backup_path, &config_path);
+                    let _ = fs::remove_file(&backup_path);
+                    HttpResponse::InternalServerError().json(NginxResponse {
+                        success: false,
+                        message: format!("Nginx test edilə bilmədi: {}", e),
+                    })
+                }
+            }
+        },
+        Err(e) => {
+            error!("Failed to write config file: {}", e);
+            let _ = fs::copy(&backup_path, &config_path);
+            let _ = fs::remove_file(&backup_path);
+            HttpResponse::InternalServerError().json(NginxResponse {
+                success: false,
+                message: format!("Fayl yazıla bilmədi: {}", e),
             })
         },
     }
@@ -1561,6 +1726,7 @@ async fn main() -> std::io::Result<()> {
             .service(kill_process)
             .service(get_nginx_proxies)
             .service(create_nginx_proxy)
+            .service(update_nginx_proxy)
             .service(delete_nginx_proxy)
             .service(format_nginx_extra_config)
             .service(format_nginx_extra_config)

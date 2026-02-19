@@ -365,6 +365,9 @@ server {${sslConfig}
         async function saveProxy(event) {
             event.preventDefault();
             
+            const proxyId = document.getElementById('proxy-id').value;
+            const isEdit = !!proxyId;
+            
             const extraConfig = document.getElementById('proxy-extra').value.trim();
             
             // Validate extra config before saving
@@ -401,8 +404,12 @@ server {${sslConfig}
             };
             
             try {
-                const response = await fetch(`${API_BASE}/api/nginx/proxies`, {
-                    method: 'POST',
+                const url = isEdit 
+                    ? `${API_BASE}/api/nginx/proxies/${proxyId}`
+                    : `${API_BASE}/api/nginx/proxies`;
+                
+                const response = await fetch(url, {
+                    method: isEdit ? 'PUT' : 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(data)
                 });

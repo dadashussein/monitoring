@@ -1,0 +1,15 @@
+version: "3.9"
+
+services:
+  resource-manager:
+    image: dadashussein/resource-manager
+    container_name: resource-manager
+    ports:
+      - "3012:3012"
+    environment:
+      APP_PORT: "3012"
+      APP_HOST: "0.0.0.0"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /etc/nginx:/etc/nginx
+    restart: unless-stopped
