@@ -77,19 +77,26 @@ jobs:
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
+        with:
+          path: artifacts
 
       - name: Display structure of downloaded files
-        run: ls -R
+        run: ls -R artifacts
+
+      - name: Rename binaries
+        run: |
+          mkdir -p release-files
+          cp artifacts/ubuntu_resource_api-x86_64-unknown-linux-gnu/ubuntu_resource_api release-files/ubuntu_resource_api-x86_64-unknown-linux-gnu
+          cp artifacts/ubuntu_resource_api-aarch64-unknown-linux-gnu/ubuntu_resource_api release-files/ubuntu_resource_api-aarch64-unknown-linux-gnu
+          cp artifacts/ubuntu_resource_api-armv7-unknown-linux-gnueabihf/ubuntu_resource_api release-files/ubuntu_resource_api-armv7-unknown-linux-gnueabihf
+          cp install-binary.sh release-files/
+          cp uninstall.sh release-files/
+          chmod +x release-files/*
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: |
-            ubuntu_resource_api-x86_64-unknown-linux-gnu/ubuntu_resource_api
-            ubuntu_resource_api-aarch64-unknown-linux-gnu/ubuntu_resource_api
-            ubuntu_resource_api-armv7-unknown-linux-gnueabihf/ubuntu_resource_api
-            install-binary.sh
-            uninstall.sh
+          files: release-files/*
           body: |
             ## 🚀 Ubuntu Resource Monitor Release
             
